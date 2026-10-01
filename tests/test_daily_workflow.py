@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import subprocess
@@ -20,55 +21,133 @@ def wf():
     return yaml.safe_load(WORKFLOW.read_text())
 
 
-@pytest.fixture(scope="module")
-def steps(wf):
-    return wf["jobs"]["scrape"]["steps"]
+def steps_of(wf, job):
+    return wf["jobs"][job]["steps"]
 
 
-def names(steps):
-    return [s.get("name", s.get("uses")) for s in steps]
+def find(steps, fragment):
+    return next(s for s in steps if fragment in s.get("name", ""))
 
 
 def index(steps, fragment):
     return next(i for i, s in enumerate(steps) if fragment in s.get("name", ""))
 
 
-def test_runs_daily_and_by_hand_and_only_writes_contents(wf):
-    triggers = wf.get("on") or wf.get(True)
-    assert triggers["schedule"][0]["cron"] == "0 19 * * *"
-    assert "workflow_dispatch" in triggers
+def triggers(wf):
+    return wf.get("on") or wf.get(True)
+
+
+def test_four_schedules_a_day_and_manual_runs_with_inputs(wf):
+    assert [c["cron"] for c in triggers(wf)["schedule"]] == ["0 19 * * *", "0 1 * * *", "0 7 * * *", "0 13 * * *"]
+    inputs = triggers(wf)["workflow_dispatch"]["inputs"]
+    assert inputs["retailers"]["options"] == ["both", "bws", "liquorland"]
+    assert inputs["clear_backoff"]["options"] == ["none", "bws", "liquorland", "all"]
     assert wf["permissions"] == {"contents": "write"}
     assert wf["concurrency"] == {"group": "daily-scrape", "cancel-in-progress": False}
 
 
-def test_never_scrapes_dan_murphys_in_the_cloud(wf):
-    assert wf["jobs"]["scrape"]["env"]["BEEROO_SKIP_RETAILERS"] == "dan_murphys"
+def test_each_retailer_is_its_own_job_leg_so_one_can_be_re_run_alone(wf):
+    scrape = wf["jobs"]["scrape"]
+    assert scrape["strategy"]["fail-fast"] is False
+    assert scrape["strategy"]["matrix"] == "${{ fromJSON(needs.plan.outputs.matrix) }}"
+    assert wf["jobs"]["publish"]["needs"] == ["plan", "scrape"]
 
 
-def test_the_data_is_saved_before_anything_that_can_fail_the_day(steps):
-    order = [index(steps, f) for f in ("Restore", "Ingest", "Scrape", "Save the database", "Export", "Deploy")]
+def run_plan(wf, **env):
+    script = steps_of(wf, "plan")[0]["run"]
+    out = Path(env.pop("OUT"))
+    full = {"PATH": os.environ["PATH"], "GITHUB_OUTPUT": str(out), "SCHEDULE": "", "RETAILERS": "", "ZONES": "", **env}
+    proc = subprocess.run([SH, "-c", script], capture_output=True, text=True, env=full)
+    matrix = json.loads(out.read_text().split("matrix=", 1)[1]) if out.exists() and out.read_text() else None
+    return proc, matrix
+
+
+def legs(matrix):
+    return [(i["retailer"], i["zones"]) for i in matrix["include"]]
+
+
+def test_plan_evening_run_does_bws_fully_and_one_liquorland_state(wf, tmp_path):
+    proc, m = run_plan(wf, OUT=tmp_path / "o", SCHEDULE="0 19 * * *")
+    assert proc.returncode == 0 and legs(m) == [("bws", "8"), ("liquorland", "1")]
+
+
+@pytest.mark.parametrize("cron", ["0 1 * * *", "0 7 * * *", "0 13 * * *"])
+def test_plan_other_runs_do_one_liquorland_state_only(wf, tmp_path, cron):
+    _, m = run_plan(wf, OUT=tmp_path / "o", SCHEDULE=cron)
+    assert legs(m) == [("liquorland", "1")]
+
+
+@pytest.mark.parametrize("choice,zones,expected", [
+    ("both", "", [("bws", "8"), ("liquorland", "1")]),
+    ("bws", "", [("bws", "8")]),
+    ("liquorland", "3", [("liquorland", "3")]),
+    ("both", "2", [("bws", "2"), ("liquorland", "2")]),
+])
+def test_plan_manual_runs_follow_the_inputs(wf, tmp_path, choice, zones, expected):
+    _, m = run_plan(wf, OUT=tmp_path / "o", RETAILERS=choice, ZONES=zones)
+    assert legs(m) == expected
+
+
+@pytest.mark.parametrize("bad", ["0", "9", "x", "1; rm -rf /"])
+def test_plan_rejects_a_bad_zone_count(wf, tmp_path, bad):
+    proc, _ = run_plan(wf, OUT=tmp_path / "o", RETAILERS="both", ZONES=bad)
+    assert proc.returncode != 0
+
+
+def test_scrape_jobs_never_write_the_database_or_the_branch(wf):
+    scrape = steps_of(wf, "scrape")
+    text = yaml.dump(scrape)
+    assert "--emit-dir data/outbox" in text and "--min-spacing 600" in text
+    assert "data_branch.py save" not in text and "ingest_inbox" not in text
+
+
+def test_scrape_state_is_per_retailer_and_a_block_can_be_cleared(wf):
+    step = find(steps_of(wf, "scrape"), "Scrape (headed")
+    assert 'scrape_state_$RETAILER.json' in step["run"] and "--retailer" in step["run"]
+    assert step["env"]["CLEAR_BACKOFF"] == "${{ inputs.clear_backoff || 'none' }}"
+
+
+def test_every_scrape_leg_hands_over_pages_state_and_log_even_when_it_fails(wf):
+    steps = steps_of(wf, "scrape")
+    uploads = [s for s in steps if s.get("uses", "").startswith("actions/upload-artifact")]
+    assert {u["with"]["name"] for u in uploads} == {"pages-${{ matrix.retailer }}", "state-${{ matrix.retailer }}", "log-${{ matrix.retailer }}"}
+    assert all(u["if"] == "always()" for u in uploads)
+    assert steps[-1]["if"] == "always()" and "Fail this job" in steps[-1]["name"]
+
+
+def test_publish_saves_the_data_before_anything_that_can_fail_the_day(wf):
+    steps = steps_of(wf, "publish")
+    order = [index(steps, f) for f in ("Restore", "Ingest Dan", "Ingest this run", "Save the database", "Export", "Deploy")]
     assert order == sorted(order)
-    assert steps[index(steps, "Save the database")]["if"].startswith("always()")
+    assert find(steps, "Save the database")["if"].startswith("always()")
 
 
-def test_secrets_only_reach_the_steps_that_need_them_and_never_the_shell_text(steps):
-    for step in steps:
-        run = step.get("run", "")
-        assert "secrets." not in run and "${{ inputs" not in run
-    holders = {s["name"] for s in steps if "secrets." in yaml.dump(s.get("env", {}))}
-    assert holders == {"Restore the database from the data branch", "Save the database to the data branch",
-                       "Deploy to Cloudflare Pages"}
+def test_publish_runs_even_if_a_scrape_failed_and_then_fails_so_a_rerun_includes_it(wf):
+    publish = wf["jobs"]["publish"]
+    assert publish["if"].startswith("always()")
+    last = publish["steps"][-1]
+    assert last["if"] == "always()" and last["env"]["SCRAPE_RESULT"] == "${{ needs.scrape.result }}"
 
 
-def test_a_blocked_or_failed_scrape_fails_the_run_after_publishing(steps):
-    assert index(steps, "Fail the run") == len(steps) - 1
-    assert steps[-1]["if"] == "always()"
+def test_secrets_only_reach_the_steps_that_need_them_and_never_the_shell_text(wf):
+    holders = set()
+    for job in wf["jobs"].values():
+        for step in job["steps"]:
+            assert "secrets." not in step.get("run", "") and "${{ inputs" not in step.get("run", "")
+            if "secrets." in yaml.dump(step.get("env", {})):
+                holders.add(step["name"])
+    assert holders == {"Restore back-off state from the data branch", "Restore the database from the data branch",
+                       "Save the database to the data branch", "Deploy to Cloudflare Pages"}
+
+
+def test_the_cloud_never_scrapes_dan_murphys(wf):
+    assert "dan_murphys" not in yaml.dump(wf["jobs"]["plan"]) and "dan_murphys" not in yaml.dump(wf["jobs"]["scrape"])
 
 
 def test_summary_title_is_configurable():
     text = '{"results": [{"retailer": "bws", "zone": "NSW", "status": "ok", "collected": 5, "expected": 5}]}'
-    md, _ = ci_summary.summarise(text, "0", "Daily cloud scrape")
-    assert md.startswith("## Daily cloud scrape")
+    md, _ = ci_summary.summarise(text, "0", "Scrape: bws")
+    assert md.startswith("## Scrape: bws")
 
 
 # ---- daily_run.sh relay mode (Dan Murphy's only, hand-off to the cloud) -------------
@@ -131,11 +210,3 @@ def test_without_a_data_remote_everything_still_runs_locally(repo):
     run(path)
     text = log.read_text()
     assert "--emit-dir" not in text and "export_static" in text
-
-
-def test_cloud_scrape_spaces_visits_and_can_clear_a_saved_block(wf, steps):
-    scrape = steps[index(steps, "Scrape")]
-    assert "--min-spacing 600" in scrape["run"]
-    assert scrape["env"]["CLEAR_BACKOFF"] == "${{ inputs.clear_backoff || 'none' }}"
-    options = (wf.get("on") or wf.get(True))["workflow_dispatch"]["inputs"]["clear_backoff"]["options"]
-    assert options == ["none", "bws", "liquorland", "all"]

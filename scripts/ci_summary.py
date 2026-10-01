@@ -42,14 +42,14 @@ def summarise(result_text, exit_code, title="Cloud scrape experiment"):
                   f"Exit code: `{exit_code}`. See the uploaded `scrape.log`."]
         return "\n".join(lines) + "\n", "no result"
 
-    lines += ["| Retailer | State | Status | Collected | Prices stored |", "|---|---|---|---|---|"]
+    lines += ["| Retailer | State | Status | Collected |", "|---|---|---|---|"]
     verdict = None
     for r in data["results"]:
         status = r.get("status", "?")
         label, text = VERDICTS.get(status, (status, "Unrecognised status."))
         verdict = verdict or (label, text)
         lines.append(f"| {r.get('retailer')} | {r.get('state') or r.get('zone') or ''} | {status} | "
-                     f"{r.get('collected', '')} of {r.get('expected', '')} | {r.get('new_observations', '')} |")
+                     f"{r.get('collected', '')} of {r.get('expected', '')} |")
     lines += ["", f"**Verdict: {verdict[0]}.** {verdict[1]}", "", f"Scraper exit code: `{exit_code}`."]
     return "\n".join(lines) + "\n", verdict[0]
 

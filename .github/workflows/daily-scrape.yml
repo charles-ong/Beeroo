@@ -1,23 +1,41 @@
-# Daily BWS + Liquorland scrape on a free GitHub-hosted runner, then publish.
+# Daily cloud scrape: independent per-retailer jobs, then one publish job.
 #
-# Dan Murphy's blocks cloud servers, so your Mac scrapes it (scripts/daily_run.sh
-# with BEEROO_DATA_REMOTE) and hands the pages over through the `data` branch inbox;
-# this job ingests them. Setup and caveats: docs/CLOUD_SCRAPE.md.
+#   plan -> scrape (bws) ----┐
+#           scrape (liquorland) ┴-> publish (ingest, save data, export, deploy)
 #
-# Order matters: scrape -> SAVE THE DATA -> export -> deploy. A failed deploy
-# never loses the day's prices.
+# * Each retailer is its own job, so one that fails or is blocked can be re-run alone
+#   (run page -> "Re-run failed jobs": it re-runs that scrape plus publish).
+# * Scrape jobs never touch the database. They hand their pages and back-off state to
+#   `publish`, the only job that writes the `data` branch, so nothing can clash.
+# * Dan Murphy's blocks cloud servers: your Mac scrapes it and pushes pages to the
+#   branch inbox (scripts/daily_run.sh); `publish` ingests them. docs/CLOUD_SCRAPE.md.
 #
-# Runs at 19:00 UTC (~05:00-06:00 in Sydney), after the Mac's 03:00 run.
+# Schedule (UTC): 19:00 = BWS (all 8 states) + 1 Liquorland state; 01:00, 07:00, 13:00 =
+# 1 Liquorland state each. Liquorland's bot protection tolerates only a couple of visits
+# a day from GitHub's addresses, so it gets one slow session per run, oldest state first
+# (about 5 per day, all 8 states in under two days). Edit the cron lines to change that.
 # Liquorland's robots.txt disallows the /api/ path its pages load data from
-# (docs/SCHEDULED_SCRAPE.md); removing it from RETAILERS below leaves it out.
+# (docs/SCHEDULED_SCRAPE.md); delete its entry from the plan step to leave it out.
 # Free-minute allowances and policies change; check GitHub's current terms.
 name: Daily cloud scrape
 
 on:
   schedule:
     - cron: "0 19 * * *"
+    - cron: "0 1 * * *"
+    - cron: "0 7 * * *"
+    - cron: "0 13 * * *"
   workflow_dispatch:
     inputs:
+      retailers:
+        description: Which retailers to scrape
+        type: choice
+        default: both
+        options: [both, bws, liquorland]
+      zones_per_run:
+        description: States per retailer (1-8). Blank = BWS 8, Liquorland 1
+        type: string
+        default: ""
       clear_backoff:
         description: Forget a saved block first (a retailer that blocked us is skipped for days)
         type: choice
@@ -32,12 +50,44 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  scrape:
+  plan:
     runs-on: ubuntu-latest
-    timeout-minutes: 240
-    env:
-      # a retailer left out here is not scraped by this job
-      BEEROO_SKIP_RETAILERS: dan_murphys
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - id: plan
+        env:
+          SCHEDULE: ${{ github.event.schedule }}
+          RETAILERS: ${{ inputs.retailers }}
+          ZONES: ${{ inputs.zones_per_run }}
+        run: |
+          set -eu
+          case "$ZONES" in ""|[1-8]) ;; *) echo "zones_per_run must be 1-8" >&2; exit 1 ;; esac
+          bws=false; ll=false
+          if [ -n "$RETAILERS" ]; then            # started by hand
+            case "$RETAILERS" in both) bws=true; ll=true ;; bws) bws=true ;; liquorland) ll=true ;; esac
+          elif [ "$SCHEDULE" = "0 19 * * *" ]; then
+            bws=true; ll=true
+          else
+            ll=true
+          fi
+          items=""
+          [ "$bws" = true ] && items="{\"retailer\":\"bws\",\"zones\":\"${ZONES:-8}\"}"
+          if [ "$ll" = true ]; then
+            [ -n "$items" ] && items="$items,"
+            items="$items{\"retailer\":\"liquorland\",\"zones\":\"${ZONES:-1}\"}"
+          fi
+          echo "matrix={\"include\":[$items]}" >> "$GITHUB_OUTPUT"
+          echo "Planned: $items"
+
+  scrape:
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -51,6 +101,93 @@ jobs:
           pip install -r requirements.txt
           python -m playwright install --with-deps chromium
 
+      - name: Restore back-off state from the data branch
+        env:
+          BEEROO_DATA_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        run: |
+          mkdir -p data
+          python scripts/data_branch.py restore --clone data-branch --into data
+
+      - name: Scrape (headed, on a virtual display; pages are saved, not ingested)
+        id: scrape
+        env:
+          RETAILER: ${{ matrix.retailer }}
+          ZONES: ${{ matrix.zones }}
+          CLEAR_BACKOFF: ${{ inputs.clear_backoff || 'none' }}
+        run: |
+          set +e
+          EXTRA=""
+          case "$CLEAR_BACKOFF" in all|"$RETAILER") EXTRA="--clear-backoff $RETAILER" ;; esac
+          # --min-spacing: on average at least 10 minutes between visits to the same site
+          xvfb-run -a --server-args="-screen 0 1440x900x24" \
+            python scripts/scheduled_scrape.py $EXTRA --retailer "$RETAILER" --zones-per-run "$ZONES" \
+              --min-spacing 600 --emit-dir data/outbox \
+              --state "data/scrape_state_$RETAILER.json" > data/result.json
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Summarise
+        if: always()
+        env:
+          RETAILER: ${{ matrix.retailer }}
+        run: |
+          python scripts/ci_summary.py data/result.json "${{ steps.scrape.outputs.exit_code }}" "Scrape: $RETAILER" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Hand the pages to publish
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-${{ matrix.retailer }}
+          path: data/outbox
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Hand the back-off state to publish
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: state-${{ matrix.retailer }}
+          path: data/scrape_state_${{ matrix.retailer }}.json
+          if-no-files-found: ignore
+          retention-days: 3
+
+      - name: Keep the log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: log-${{ matrix.retailer }}
+          path: |
+            data/result.json
+            data/scrape.log
+            data/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Fail this job if the site errored or blocked us
+        if: always()
+        env:
+          EXIT_CODE: ${{ steps.scrape.outputs.exit_code }}
+        run: |
+          case "$EXIT_CODE" in
+            0) exit 0 ;;
+            *) echo "the scrape exited with code '$EXIT_CODE' (1 = error, 3 = blocked, empty = crashed): see the summary and log"; exit 1 ;;
+          esac
+
+  publish:
+    needs: [plan, scrape]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
       - name: Restore the database from the data branch
         id: restore
         env:
@@ -62,32 +199,30 @@ jobs:
       - name: Ingest Dan Murphy's pages from the inbox
         run: python scripts/ingest_inbox.py --dir data-branch/inbox --db data/beeroo.sqlite3
 
-      - name: Scrape BWS and Liquorland (headed, on a virtual display)
-        id: scrape
-        env:
-          CLEAR_BACKOFF: ${{ inputs.clear_backoff || 'none' }}
-        run: |
-          set +e
-          EXTRA=""
-          [ "$CLEAR_BACKOFF" != "none" ] && EXTRA="--clear-backoff $CLEAR_BACKOFF"
-          # --min-spacing: on average at least 10 minutes between visits to the same site
-          # (a 3-minute gap got Liquorland's bot protection to appear on the second state)
-          xvfb-run -a --server-args="-screen 0 1440x900x24" \
-            python scripts/scheduled_scrape.py $EXTRA --min-spacing 600 \
-              --state data/scrape_state_cloud.json --db data/beeroo.sqlite3 \
-              > data/result.json
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+      - name: Collect this run's scraped pages
+        continue-on-error: true      # nothing to collect if every scrape failed before saving a page
+        uses: actions/download-artifact@v4
+        with:
+          pattern: pages-*
+          path: incoming
+          merge-multiple: true
 
-      - name: Summarise
-        if: always()
-        run: |
-          python scripts/ci_summary.py data/result.json "${{ steps.scrape.outputs.exit_code }}" "Daily cloud scrape" >> "$GITHUB_STEP_SUMMARY"
+      - name: Collect this run's back-off state
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: state-*
+          path: data
+          merge-multiple: true
+
+      - name: Ingest this run's pages
+        run: python scripts/ingest_inbox.py --dir incoming --db data/beeroo.sqlite3
 
       - name: Save the database to the data branch
         if: always() && steps.restore.outcome == 'success'
         env:
           BEEROO_DATA_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
-        run: python scripts/data_branch.py save --clone data-branch --db data/beeroo.sqlite3 --state data/scrape_state_cloud.json
+        run: python scripts/data_branch.py save --clone data-branch --db data/beeroo.sqlite3
 
       - name: Export the website
         run: python scripts/export_static.py --db data/beeroo.sqlite3 --out site
@@ -113,25 +248,23 @@ jobs:
           fi
           scripts/deploy_cloudflare.sh site
 
-      - name: Keep the evidence
+      - name: Keep rejected pages
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: daily-scrape
+          name: publish-rejected
           path: |
-            data/result.json
-            data/scrape.log
-            data/*.png
             data-branch/inbox/rejected
+            incoming/rejected
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Fail the run if a site errored or blocked us
+      - name: Fail if a scrape failed (so "Re-run failed jobs" re-runs publish too)
         if: always()
         env:
-          EXIT_CODE: ${{ steps.scrape.outputs.exit_code }}
+          SCRAPE_RESULT: ${{ needs.scrape.result }}
         run: |
-          case "$EXIT_CODE" in
-            0|"") exit 0 ;;
-            *) echo "the scrape exited with code $EXIT_CODE (1 = error, 3 = blocked): see the summary and log"; exit 1 ;;
+          case "$SCRAPE_RESULT" in
+            success|skipped) exit 0 ;;
+            *) echo "a scrape job ended '$SCRAPE_RESULT'; the data that did arrive was saved and deployed"; exit 1 ;;
           esac

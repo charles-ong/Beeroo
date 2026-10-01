@@ -21,14 +21,14 @@ from common.pipeline import run_matching  # noqa: E402
 def ingest_inbox(inbox, db_path):
     inbox = Path(inbox)
     files = sorted(p for p in inbox.rglob("*.json") if "rejected" not in p.parts)
-    done, rejected = 0, []
+    done, rejected, new_prices = 0, [], 0
     conn = db.connect(str(db_path))
 
     try:
         for path in files:
             try:
                 body = ingest.IngestIn.model_validate(json.loads(path.read_text()))
-                ingest.ingest_trusted(conn, body)
+                result = ingest.ingest_trusted(conn, body)
             except (ValueError, ingest.IngestError) as e:
                 bad = inbox / "rejected" / path.name
                 bad.parent.mkdir(parents=True, exist_ok=True)
@@ -37,12 +37,13 @@ def ingest_inbox(inbox, db_path):
                 continue
             path.unlink()
             done += 1
+            new_prices += result.get("new_observations", 0)
         if done:
             run_matching(conn)
     finally:
         conn.close()
 
-    return done, rejected
+    return done, rejected, new_prices
 
 
 def main(argv=None):
@@ -53,8 +54,8 @@ def main(argv=None):
     if not Path(args.dir).exists():
         print("inbox is empty")
         return 0
-    done, rejected = ingest_inbox(args.dir, args.db)
-    print(f"ingested {done} page(s) from the inbox")
+    done, rejected, new_prices = ingest_inbox(args.dir, args.db)
+    print(f"ingested {done} page(s) from {args.dir}: {new_prices} new price observation(s)")
     for name, why in rejected:
         print(f"REJECTED {name}: {why}")
     return 0

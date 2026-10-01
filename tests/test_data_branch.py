@@ -44,13 +44,39 @@ def test_first_restore_is_empty_then_save_and_restore_roundtrip(remote, tmp_path
 
     local = tmp_path / "local.sqlite3"
     make_db(local, rows=3)
-    (tmp_path / "state.json").write_text('{"a": 1}')
-    dbr.save(remote, tmp_path / "c1", local, tmp_path / "state.json")
+    (tmp_path / "scrape_state_bws.json").write_text('{"a": 1}')
+    dbr.save(remote, tmp_path / "c1", local, [tmp_path / "scrape_state_bws.json"])
 
     assert dbr.restore(remote, tmp_path / "c2", tmp_path / "d2") is True
     restored = sqlite3.connect(tmp_path / "d2" / dbr.DB_NAME)
     assert restored.execute("SELECT COUNT(*) FROM t").fetchone()[0] == 3
-    assert json.loads((tmp_path / "d2" / dbr.STATE_NAME).read_text()) == {"a": 1}
+    assert json.loads((tmp_path / "d2" / "scrape_state_bws.json").read_text()) == {"a": 1}
+
+
+def test_state_files_are_per_retailer_and_stale_ones_are_pruned(remote, tmp_path):
+    local = tmp_path / "l.sqlite3"
+    make_db(local)
+    (tmp_path / "scrape_state_bws.json").write_text("1")
+    (tmp_path / "scrape_state_liquorland.json").write_text("2")
+    dbr.restore(remote, tmp_path / "c", tmp_path / "d")
+    dbr.save(remote, tmp_path / "c", local, [tmp_path / "scrape_state_bws.json", tmp_path / "scrape_state_liquorland.json"])
+    dbr.restore(remote, tmp_path / "c", tmp_path / "d")
+    assert sorted(p.name for p in (tmp_path / "d").glob("scrape_state_*.json")) == [
+        "scrape_state_bws.json", "scrape_state_liquorland.json"]
+    dbr.save(remote, tmp_path / "c", local, [tmp_path / "scrape_state_bws.json"])     # liquorland file dropped
+    assert "scrape_state_liquorland.json" not in branch_files(remote, tmp_path)
+
+
+def test_an_old_combined_state_file_keeps_blocks_alive_after_the_split(remote, tmp_path):
+    local = tmp_path / "l.sqlite3"
+    make_db(local)
+    legacy = tmp_path / dbr.LEGACY_STATE
+    legacy.write_text('{"retailers": {"liquorland": {"blocked": {"consecutive": 1}}}}')
+    dbr.restore(remote, tmp_path / "c", tmp_path / "d")
+    dbr.save(remote, tmp_path / "c", local, [legacy])
+    dbr.restore(remote, tmp_path / "c2", tmp_path / "d2")
+    assert (tmp_path / "d2" / "scrape_state_liquorland.json").read_text() == legacy.read_text()
+    assert (tmp_path / "d2" / "scrape_state_bws.json").exists()
 
 
 def test_history_is_squashed_to_one_commit(remote, tmp_path):
@@ -172,7 +198,7 @@ def test_ingest_inbox_rejects_bad_pages_without_stopping(tmp_path):
     dbfile = tmp_path / "x.sqlite3"
     db.connect(str(dbfile)).close()
 
-    done, rejected = ingest_inbox.ingest_inbox(tmp_path / "inbox", dbfile)
+    done, rejected, _ = ingest_inbox.ingest_inbox(tmp_path / "inbox", dbfile)
     assert done == 0 and len(rejected) == 2
     assert len(list((tmp_path / "inbox").rglob("rejected/*.json"))) == 2
 
@@ -183,8 +209,8 @@ def test_ingest_inbox_ingests_a_real_page_and_deletes_it(tmp_path):
     dbfile = tmp_path / "x.sqlite3"
     db.connect(str(dbfile)).close()
 
-    done, rejected = ingest_inbox.ingest_inbox(inbox, dbfile)
-    assert (done, rejected) == (1, [])
+    done, rejected, new_prices = ingest_inbox.ingest_inbox(inbox, dbfile)
+    assert (done, rejected) == (1, []) and new_prices > 0
     assert list(inbox.rglob("*.json")) == []
     conn = db.connect(str(dbfile))
     assert conn.execute("SELECT COUNT(*) FROM listings").fetchone()[0] == 24

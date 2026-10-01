@@ -5,7 +5,7 @@ live somewhere free between runs. A branch in the same repo is free and needs no
 extra service. The branch holds:
 
     beeroo.sqlite3              the price history (single commit, history squashed)
-    scrape_state_cloud.json     the cloud scraper's backoff/progress state
+    scrape_state_<retailer>.json  each cloud scraper's backoff/progress state
     inbox/<retailer>/*.json     pages scraped elsewhere (your Mac, for Dan Murphy's),
                                 waiting to be ingested by the next cloud run
 
@@ -13,7 +13,7 @@ Commands (BEEROO_DATA_REMOTE is a git URL; it is never printed):
 
     data_branch.py restore --clone data-branch --into data
         clone the branch and copy the DB + state into ./data (empty start if none yet)
-    data_branch.py save --clone data-branch --db data/beeroo.sqlite3 --state data/scrape_state_cloud.json
+    data_branch.py save --clone data-branch --db data/beeroo.sqlite3   (+ every data/scrape_state_*.json)
         replace the branch with one commit holding the DB, state and any still-unprocessed inbox files
     data_branch.py push-inbox --from data/outbox --retailer dan_murphys
         add scraped pages to the inbox (what the Mac does); deletes them locally once pushed
@@ -22,6 +22,7 @@ Seed the branch once with your existing local history:
     BEEROO_DATA_REMOTE=git@github.com:you/beeroo.git python scripts/data_branch.py seed --db data/beeroo.sqlite3
 """
 import argparse
+import glob
 import os
 import shutil
 import sqlite3
@@ -32,7 +33,9 @@ from pathlib import Path
 
 BRANCH = "data"
 DB_NAME = "beeroo.sqlite3"
-STATE_NAME = "scrape_state_cloud.json"
+STATE_GLOB = "scrape_state_*.json"
+LEGACY_STATE = "scrape_state_cloud.json"   # before the per-retailer split
+MIGRATED_TO = ("scrape_state_bws.json", "scrape_state_liquorland.json")
 IDENTITY = ["-c", "user.name=beeroo-bot", "-c", "user.email=beeroo-bot@users.noreply.github.com",
             "-c", "commit.gpgsign=false"]
 
@@ -108,10 +111,16 @@ def restore(remote, clone_dir, into):
     existed = clone(remote, clone_dir)
     into = Path(into)
     into.mkdir(parents=True, exist_ok=True)
-    for name in (DB_NAME, STATE_NAME):
-        src = Path(clone_dir) / name
-        if src.exists():
-            shutil.copy2(src, into / name)
+    clone_dir = Path(clone_dir)
+    if (clone_dir / DB_NAME).exists():
+        shutil.copy2(clone_dir / DB_NAME, into / DB_NAME)
+    for src in clone_dir.glob(STATE_GLOB):
+        shutil.copy2(src, into / src.name)
+    legacy = clone_dir / LEGACY_STATE
+    if legacy.exists():                       # keep respecting an old block after the split
+        for name in MIGRATED_TO:
+            if not (into / name).exists():
+                shutil.copy2(legacy, into / name)
     return existed
 
 
@@ -123,7 +132,7 @@ def _commit_all(repo, message, remote, force_lease=None):
     return git(["push", "--quiet", lease, "origin", f"new-data:{BRANCH}"], cwd=repo, remote=remote, check=False)
 
 
-def save(remote, clone_dir, db_path, state_path=None, attempts=4):
+def save(remote, clone_dir, db_path, state_paths=(), attempts=4):
     """Replace the branch with one commit: DB, state and the inbox files that
     were not ingested (anything the Mac pushed since we cloned is kept too)."""
     clone_dir = Path(clone_dir)
@@ -150,8 +159,11 @@ def save(remote, clone_dir, db_path, state_path=None, attempts=4):
                 seen = seen | head_files(fresh, "inbox")
 
             snapshot_db(db_path, tree / DB_NAME)
-            if state_path and Path(state_path).exists():
-                shutil.copy2(state_path, tree / STATE_NAME)
+            for old in tree.glob(STATE_GLOB):
+                old.unlink()
+            for sp in state_paths:
+                if Path(sp).exists():
+                    shutil.copy2(sp, tree / Path(sp).name)
 
             repo = work / "repo"
             repo.mkdir()
@@ -219,7 +231,8 @@ def main(argv=None):
     s = sub.add_parser("save")
     s.add_argument("--clone", default="data-branch")
     s.add_argument("--db", default="data/beeroo.sqlite3")
-    s.add_argument("--state", default="data/scrape_state_cloud.json")
+    s.add_argument("--state", nargs="*", default=None,
+                   help="state files to keep (default: every data/scrape_state_*.json)")
     d = sub.add_parser("seed")
     d.add_argument("--db", default="data/beeroo.sqlite3")
     d.add_argument("--replace", action="store_true", help="overwrite the database already on the branch")
@@ -234,7 +247,8 @@ def main(argv=None):
             existed = restore(remote, args.clone, args.into)
             print("restored the data branch" if existed else "no data branch yet: starting empty")
         elif args.cmd == "save":
-            save(remote, args.clone, args.db, args.state)
+            states = args.state if args.state is not None else sorted(glob.glob(str(Path(args.db).parent / STATE_GLOB)))
+            save(remote, args.clone, args.db, states)
             print("data branch updated")
         elif args.cmd == "seed":
             seed(remote, args.db, args.replace)
