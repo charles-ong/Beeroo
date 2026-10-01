@@ -345,3 +345,30 @@ def test_kopparberg_when_only_the_single_can_is_in_stock():
     ten["IsAvailable"] = twenty["IsAvailable"] = False
     p = parse_one(ten, can, twenty)
     assert [(o.units, o.pack_type.value, o.price) for o in p.prices] == [(1, "single", 5.0)]     # not "10 for $5"
+
+
+# ---- waiting for the store response ----------------------------------------------
+
+
+def test_wait_for_returns_as_soon_as_the_value_appears():
+    calls = {"n": 0, "slept": []}
+
+    def getter():
+        calls["n"] += 1
+        return {"Success": True} if calls["n"] >= 4 else None
+
+    async def fake_sleep(s):
+        calls["slept"].append(s)
+
+    assert run(bws_live.wait_for(getter, timeout_s=15, step_s=0.5, sleep=fake_sleep)) == {"Success": True}
+    assert calls["slept"] == [0.5, 0.5, 0.5]                      # polled, did not sleep a fixed 4 s
+
+
+def test_wait_for_gives_up_after_the_timeout_and_returns_what_it_has():
+    slept = []
+
+    async def fake_sleep(s):
+        slept.append(s)
+
+    assert run(bws_live.wait_for(lambda: None, timeout_s=3, step_s=1, sleep=fake_sleep)) is None
+    assert len(slept) == 3

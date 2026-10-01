@@ -82,6 +82,20 @@ def save_state(path, state):
     tmp.replace(path)
 
 
+def clear_backoff(state_path, names):
+    """Forget the block/backoff for these retailers (e.g. after you've checked the
+    site works from your connection). Returns the retailers that had one."""
+    state = load_state(state_path)
+    cleared = []
+    for name in names:
+        r = state.get("retailers", {}).get(name)
+        if r and (r.get("blocked", {}).get("consecutive") or r.get("blocked", {}).get("backoff_until")):
+            r["blocked"] = {"consecutive": 0, "backoff_until": None}
+            cleared.append(name)
+    save_state(state_path, state)
+    return cleared
+
+
 def retailer_state(state, name):
     return state.setdefault("retailers", {}).setdefault(name, _blank())
 
@@ -385,11 +399,18 @@ def main(argv=None):
     ap.add_argument("--state", default=str(DEFAULT_STATE))
     ap.add_argument("--max-pages", type=int, default=60)
     ap.add_argument("--jitter", type=int, default=0, help="random start delay up to N seconds")
+    ap.add_argument("--clear-backoff", choices=["all", *RETAILERS], metavar="RETAILER",
+                    help="forget a block/backoff first (all, bws, liquorland or dan_murphys), then run")
     ap.add_argument("--min-spacing", type=int, default=MIN_SPACING_S, help="min average seconds between sessions on the same site")
     ap.add_argument("--browser-path", default=os.environ.get("BEEROO_CHROMIUM_PATH"))
     args = ap.parse_args(argv)
 
     setup_logging(DEFAULT_LOG)
+
+    if args.clear_backoff:
+        names = list(RETAILERS) if args.clear_backoff == "all" else [args.clear_backoff]
+        cleared = clear_backoff(args.state, names)
+        log.info("cleared backoff for: %s", ", ".join(cleared) if cleared else "nothing (none was set)")
 
     lock = open(ROOT / "data" / ".scrape.lock", "w") if (ROOT / "data").exists() else None
     if lock:

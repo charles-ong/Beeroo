@@ -54,6 +54,18 @@ def path_allowed(robots_text, path, agent="*"):
     return best is None or best[0] == "allow"
 
 
+async def wait_for(getter, timeout_s=15.0, step_s=0.5, sleep=asyncio.sleep):
+    """Poll `getter()` until it returns something truthy or the timeout passes."""
+    waited = 0.0
+    while waited < timeout_s:
+        value = getter()
+        if value:
+            return value
+        await sleep(step_s)
+        waited += step_s
+    return getter()
+
+
 class BwsCollector:
     """Passively records the product responses the page loads."""
 
@@ -137,7 +149,13 @@ async def select_store(page, collector, postcode):
     collector.preferences = None
     select = page.get_by_text(re.compile(r"^\s*select\s*$", re.I)).locator(visible).first
     await select.click(timeout=15000)
-    await page.wait_for_timeout(4000)
+    # wait for the site's own answer (slow responses used to be missed by a fixed 4 s sleep)
+    if not await wait_for(lambda: collector.preferences):
+        log.warning("no store response after SELECT; clicking once more")
+        if await select.count():
+            await select.click(timeout=10000)
+        await wait_for(lambda: collector.preferences)
+    await page.wait_for_timeout(1000)
     return bws.location_from_set_pickup(collector.preferences)
 
 
@@ -177,7 +195,11 @@ async def scrape(page, postcode, max_pages=MAX_ROUNDS, raw_pages=None):
         await page.screenshot(path="data/bws_location_debug.png")
         raise
     if location is None:
-        raise RuntimeError("could not determine the active BWS store")
+        await page.screenshot(path="data/bws_location_debug.png")
+        prefs = collector.preferences
+        what = "no SetPickupByStoreNo response was seen" if prefs is None else (
+            f"SetPickupByStoreNo returned Success={prefs.get('Success')!r} with keys {sorted(prefs)[:6]}")
+        raise RuntimeError(f"could not determine the active BWS store ({what}); see data/bws_location_debug.png")
 
     collector.items.clear()
     response = await page.goto(CATEGORY_URL, wait_until="domcontentloaded", timeout=60000)

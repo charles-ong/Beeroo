@@ -487,3 +487,35 @@ def test_browser_resolution_order(tmp_path):
         ss.resolve_browser_path(None, str(tmp_path / "missing"), tmp_path / "nothing")
     with pytest.raises(ss.NoBrowser, match="does not exist"):
         ss.resolve_browser_path(str(tmp_path / "typo"), str(pinned), tmp_path / "cache")
+
+
+# ---- clearing a backoff ------------------------------------------------------------
+
+
+def test_clear_backoff_resets_only_the_named_retailer(state):
+    go(state, {"dan_murphys": blocked("dan_murphys", []), "bws": robots("bws", [])})
+    st = ss.load_state(state)["retailers"]
+    assert st["dan_murphys"]["blocked"]["backoff_until"] and st["bws"]["blocked"]["backoff_until"]
+    assert ss.clear_backoff(state, ["dan_murphys"]) == ["dan_murphys"]
+    st = ss.load_state(state)["retailers"]
+    assert st["dan_murphys"]["blocked"] == {"consecutive": 0, "backoff_until": None}
+    assert st["bws"]["blocked"]["backoff_until"]                             # untouched
+    assert ss.clear_backoff(state, ["dan_murphys"]) == []                    # nothing left to clear
+
+
+def test_cli_clear_backoff_then_runs_that_retailer(tmp_path, monkeypatch):
+    calls = []
+    st = str(tmp_path / "s.json")
+    go(st, {"dan_murphys": blocked("dan_murphys", [])}, zones_per_run=1)
+    monkeypatch.setattr(ss, "DEFAULT_LOG", tmp_path / "scrape.log")
+    monkeypatch.setattr(ss, "real_scrapes", lambda browser_path=None: {n: fake(n, calls=calls) for n in ALL})
+    skipped = ss.main(["--db", str(tmp_path / "x.sqlite3"), "--state", st, "--retailer", "dan_murphys", "--zone", "NSW", "--min-spacing", "0"])
+    assert calls == [] and skipped == 0                                      # still backing off: not even launched
+    ran = ss.main(["--db", str(tmp_path / "x.sqlite3"), "--state", st, "--retailer", "dan_murphys", "--zone", "NSW",
+                   "--clear-backoff", "dan_murphys", "--min-spacing", "0"])
+    assert ran == 0 and [c[0] for c in calls] == ["dan_murphys"]
+
+
+def test_cli_rejects_an_unknown_retailer_for_clear_backoff():
+    with pytest.raises(SystemExit):
+        ss.main(["--clear-backoff", "woolworths"])
