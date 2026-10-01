@@ -1,0 +1,125 @@
+# Daily BWS + Liquorland scrape on a free GitHub-hosted runner, then publish.
+#
+# Dan Murphy's blocks cloud servers, so your Mac scrapes it (scripts/daily_run.sh
+# with BEEROO_DATA_REMOTE) and hands the pages over through the `data` branch inbox;
+# this job ingests them. Setup and caveats: docs/CLOUD_SCRAPE.md.
+#
+# Order matters: scrape -> SAVE THE DATA -> export -> deploy. A failed deploy
+# never loses the day's prices.
+#
+# Runs at 19:00 UTC (~05:00-06:00 in Sydney), after the Mac's 03:00 run.
+# Liquorland's robots.txt disallows the /api/ path its pages load data from
+# (docs/SCHEDULED_SCRAPE.md); removing it from RETAILERS below leaves it out.
+# Free-minute allowances and policies change; check GitHub's current terms.
+name: Daily cloud scrape
+
+on:
+  schedule:
+    - cron: "0 19 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write        # only to update the `data` branch
+
+concurrency:
+  group: daily-scrape
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      # a retailer left out here is not scraped by this job
+      BEEROO_SKIP_RETAILERS: dan_murphys
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies and Chromium
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Restore the database from the data branch
+        id: restore
+        env:
+          BEEROO_DATA_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        run: |
+          mkdir -p data
+          python scripts/data_branch.py restore --clone data-branch --into data
+
+      - name: Ingest Dan Murphy's pages from the inbox
+        run: python scripts/ingest_inbox.py --dir data-branch/inbox --db data/beeroo.sqlite3
+
+      - name: Scrape BWS and Liquorland (headed, on a virtual display)
+        id: scrape
+        run: |
+          set +e
+          xvfb-run -a --server-args="-screen 0 1440x900x24" \
+            python scripts/scheduled_scrape.py \
+              --state data/scrape_state_cloud.json --db data/beeroo.sqlite3 \
+              > data/result.json
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Summarise
+        if: always()
+        run: |
+          python scripts/ci_summary.py data/result.json "${{ steps.scrape.outputs.exit_code }}" "Daily cloud scrape" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Save the database to the data branch
+        if: always() && steps.restore.outcome == 'success'
+        env:
+          BEEROO_DATA_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        run: python scripts/data_branch.py save --clone data-branch --db data/beeroo.sqlite3 --state data/scrape_state_cloud.json
+
+      - name: Export the website
+        run: python scripts/export_static.py --db data/beeroo.sqlite3 --out site
+
+      - name: Freshness report
+        run: |
+          {
+            echo "### Freshness"
+            echo '```'
+            python scripts/check_freshness.py --db data/beeroo.sqlite3
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy to Cloudflare Pages
+        env:
+          BEEROO_CF_PROJECT: ${{ vars.BEEROO_CF_PROJECT }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$BEEROO_CF_PROJECT" ]; then
+            echo "BEEROO_CF_PROJECT is not set (Settings > Secrets and variables > Actions > Variables): site exported but not deployed" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          scripts/deploy_cloudflare.sh site
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-scrape
+          path: |
+            data/result.json
+            data/scrape.log
+            data/*.png
+            data-branch/inbox/rejected
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Fail the run if a site errored or blocked us
+        if: always()
+        env:
+          EXIT_CODE: ${{ steps.scrape.outputs.exit_code }}
+        run: |
+          case "$EXIT_CODE" in
+            0|"") exit 0 ;;
+            *) echo "the scrape exited with code $EXIT_CODE (1 = error, 3 = blocked): see the summary and log"; exit 1 ;;
+          esac

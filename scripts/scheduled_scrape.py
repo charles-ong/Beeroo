@@ -163,6 +163,30 @@ def local_push(db_path):
     return push
 
 
+def emit_push(out_dir):
+    """Instead of ingesting, write each page's ingest body to `out_dir` as JSON.
+    Used for sites scraped on a home machine whose data is ingested elsewhere
+    (see scripts/data_branch.py). Bodies are validated first, so a bad one
+    fails the scrape rather than poisoning the shared inbox."""
+    from app import ingest
+
+    out_dir = Path(out_dir)
+    counter = {"n": 0}
+
+    def push(body):
+        ingest.IngestIn.model_validate(body)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        counter["n"] += 1
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        name = f"{stamp}-{body['kind']}-{counter['n']:03d}.json"
+        tmp = out_dir / (name + ".tmp")
+        tmp.write_text(json.dumps(body))
+        tmp.rename(out_dir / name)
+        return {"products": 0, "new_observations": 0, "new_listings": 0}
+
+    return push
+
+
 def location_dict(loc):
     return {
         "store_id": loc.store_id, "store_name": loc.store_name,
@@ -395,6 +419,7 @@ def main(argv=None):
                     help=f"states per retailer per run (default {len(ZONES)} = every state and territory)")
     ap.add_argument("--zone", choices=ZONES, help="force one state/territory (testing)")
     ap.add_argument("--push", action="store_true", help="push to $BEEROO_SERVER using $BEEROO_ADMIN_TOKEN (default: local DB)")
+    ap.add_argument("--emit-dir", help="write ingest bodies to this folder instead of the database (for data_branch.py)")
     ap.add_argument("--db", default=str(DEFAULT_DB))
     ap.add_argument("--state", default=str(DEFAULT_STATE))
     ap.add_argument("--max-pages", type=int, default=60)
@@ -420,7 +445,9 @@ def main(argv=None):
             log.warning("another scrape is already running; exiting")
             return 0
 
-    if args.push:
+    if args.emit_dir:
+        push = emit_push(args.emit_dir)
+    elif args.push:
         server, token = os.environ.get("BEEROO_SERVER"), os.environ.get("BEEROO_ADMIN_TOKEN")
         if not server or not token:
             log.error("--push needs BEEROO_SERVER and BEEROO_ADMIN_TOKEN in the environment")

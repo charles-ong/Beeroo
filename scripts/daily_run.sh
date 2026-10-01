@@ -1,5 +1,15 @@
 #!/bin/sh
-# The whole daily job, on YOUR machine, all free:
+# The daily job on YOUR machine. Two modes:
+#
+# A) Dan Murphy's only, handing its data to the cloud job   (BEEROO_DATA_REMOTE is set)
+#      GitHub Actions scrapes BWS and Liquorland, publishes the site, and keeps the
+#      database (docs/CLOUD_SCRAPE.md). Dan Murphy's blocks cloud servers, so this
+#      machine scrapes only it (visible browser) and pushes the pages to the
+#      repo's `data` branch inbox for the next cloud run to ingest. Nothing is
+#      exported or published from here.
+#      BEEROO_DATA_REMOTE=git@github.com:you/beeroo.git
+#
+# B) Everything here (BEEROO_DATA_REMOTE unset), all free:
 #   1. scrape BWS, Liquorland and Dan Murphy's for every state/territory (visible browser)
 #   2. export the static website
 #   3. report anything stale
@@ -28,6 +38,15 @@ fi
 
 PY="$REPO/.venv/bin/python"
 cd "$REPO"
+
+if [ -n "${BEEROO_DATA_REMOTE:-}" ]; then
+  OUT="$REPO/data/outbox"
+  "$PY" scripts/scheduled_scrape.py --retailer "${BEEROO_LOCAL_RETAILER:-dan_murphys}" --emit-dir "$OUT" \
+    --jitter "${BEEROO_JITTER:-900}" --zones-per-run "${BEEROO_ZONES_PER_RUN:-8}" "$@"
+  SCRAPE_CODE=$?
+  "$PY" scripts/data_branch.py push-inbox --from "$OUT" --retailer dan_murphys || exit 1
+  exit "$SCRAPE_CODE"
+fi
 
 # 1. scrape (exit 3 = blocked, 1 = error; we still export what we have)
 "$PY" scripts/scheduled_scrape.py --jitter "${BEEROO_JITTER:-900}" --zones-per-run "${BEEROO_ZONES_PER_RUN:-8}" "$@"

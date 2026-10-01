@@ -3,7 +3,8 @@
     python scripts/ci_summary.py data/result.json <exit-code> >> "$GITHUB_STEP_SUMMARY"
 
 The scraper prints one JSON line on stdout; `exit-code` is its exit status
-(0 ok, 1 error, 3 blocked). Used by .github/workflows/cloud-scrape-experiment.yml.
+(0 ok, 1 error, 3 blocked). An optional third argument sets the heading.
+Used by .github/workflows/cloud-scrape-experiment.yml and daily-scrape.yml.
 """
 import json
 import sys
@@ -32,9 +33,9 @@ def parse_result(text):
     return None
 
 
-def summarise(result_text, exit_code):
+def summarise(result_text, exit_code, title="Cloud scrape experiment"):
     data = parse_result(result_text)
-    lines = ["## Cloud scrape experiment", ""]
+    lines = [f"## {title}", ""]
 
     if not data or not data.get("results"):
         lines += ["**Verdict: no result.** The scraper printed no result line, so it probably crashed before finishing.",
@@ -55,9 +56,9 @@ def summarise(result_text, exit_code):
 
 def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
-    path, code = (argv + ["", ""])[:2]
+    path, code, title = (argv + ["", "", ""])[:3]
     text = Path(path).read_text() if path and Path(path).exists() else ""
-    markdown, _ = summarise(text, code or "?")
+    markdown, _ = summarise(text, code or "?", title or "Cloud scrape experiment")
     sys.stdout.write(markdown)
     return 0
 

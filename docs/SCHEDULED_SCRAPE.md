@@ -51,6 +51,8 @@ scripts/install_launchd.sh --uninstall
 
 `daily_run.sh` = scrape, export the static site, freshness report, publish (if `BEEROO_PAGES_REMOTE` is set). A LaunchAgent needs you logged in; if the Mac sleeps it runs on wake.
 
+> **Update:** the experiment succeeded for BWS and Liquorland, and the daily cloud job now exists: see [CLOUD_SCRAPE.md](CLOUD_SCRAPE.md). With `BEEROO_DATA_REMOTE` set, this machine scrapes Dan Murphy's only.
+
 ## Can the scraping move to the cloud? (experiment)
 
 Maybe, for BWS and Liquorland; probably not for Dan Murphy's. Retailers often block datacenter addresses, so don't assume: test first. `.github/workflows/cloud-scrape-experiment.yml` runs **one retailer for one state** on a free GitHub-hosted runner (real Chromium on a virtual display) and writes a plain verdict to the run summary: *works*, *blocked*, *skipped by robots.txt* or *error*.
