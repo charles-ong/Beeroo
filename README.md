@@ -13,7 +13,7 @@ playwright install chromium
 python main.py   # writes data/dan_murphys_beer.json
 ```
 
-Parser fixtures live in `tests/fixtures/`.
+Run tests: `pip install -r requirements-dev.txt && pytest`. Parser fixtures live in `tests/fixtures/`.
 
 ## Standard drinks
 
