@@ -63,3 +63,14 @@ Liquorland's `robots.txt` has `Disallow: /api/*` and its category HTML is client
 ## Dan Murphy's live findings
 
 Headless Chromium is blocked (HTTP 403, Cloudflare). A visible browser worked at first (see above for the Browse API and store picker), then got blocked after ~9 page loads from one IP, and was still blocked hours later. It remains blocked from the development machine.
+
+## Product matching across retailers
+
+Names differ between retailers ("Sapporo Premium Lager Bottles 355ml" vs
+"Sapporo Bottles 355mL"). `common/matching.py` merges automatically only when
+the volume matches, packaging and ABV don't conflict, and the names are
+identical after removing generic words and pack counts, or differ only by a
+harmless descriptor (premium, original, cerveza, alcoholic, classic, best) with
+exactly one candidate on each side. Everything else is left unmerged and listed
+by `python scripts/match_report.py`. Fix pairs permanently in
+`data/match_overrides.csv` (`merge` / `never_merge` rows, SKUs from the report).

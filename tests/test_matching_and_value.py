@@ -129,3 +129,97 @@ def test_ingest_and_match_end_to_end(tmp_path):
     # observation time is the capture time, not now
     ts = conn.execute("SELECT MIN(observed_at) m FROM price_observations").fetchone()["m"]
     assert ts.startswith("2026-10-01T04:00:00")
+
+
+# --- descriptor-subset matching and manual overrides -------------------------
+
+from common.matching import Overrides, load_overrides  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "a,b",
+    [
+        ("Sapporo Premium Lager Bottles 355ml", "Sapporo Bottles 355mL"),
+        ("Coopers Original Pale Ale Cans 375ml", "Coopers Pale Ale Can 375mL"),
+        ("Stone's Ginger Joe Alcoholic Beer Bottles 500ml", "Stones Ginger Joe Bottle 500mL"),
+        ("Sol Cerveza Original Bottles 330ml", "Sol Beer Bottle 330mL"),
+        ("Brookvale Union Ginger Beer Cans 10 Pack 330ml", "Brookvale Union Ginger Beer Can 330mL 10pk"),
+    ],
+)
+def test_descriptor_only_differences_merge(a, b):
+    clusters, review = match_listings([L(BWS, "1", a), L(LL, "2", b)])
+    assert len(clusters) == 1 and clusters[0].retailers == {BWS, LL}
+    assert review == []
+
+
+@pytest.mark.parametrize(
+    "bws_name,ll_names",
+    [
+        # three different Liquorland beers share the BWS name as a prefix
+        ("Mountain Culture Juice Trip Cans 355ml",
+         ["Mountain Culture Juice Trip Neon Splice Can 355mL",
+          "Mountain Culture Juice Trip Fruit Hazy Can 355mL"]),
+        # Block Can vs Can: two candidates, so ambiguous
+        ("Xxxx Gold Mid Strength Lager Beer Cans 375ml",
+         ["XXXX Gold Block Can 375mL", "XXXX Gold Can 375mL"]),
+        # "mid" is a strength variant, not a harmless descriptor
+        ("Victoria Bitter Mid Cans 375ml", ["Victoria Bitter Can 375mL"]),
+    ],
+)
+def test_ambiguous_or_variant_subsets_go_to_review(bws_name, ll_names):
+    listings = [L(BWS, "b", bws_name)] + [
+        L(LL, f"l{i}", n) for i, n in enumerate(ll_names)
+    ]
+    clusters, review = match_listings(listings)
+    assert all(len(c.retailers) == 1 for c in clusters)
+    assert review
+
+
+def test_descriptor_match_needs_both_sides_unique():
+    # one Liquorland listing is the only candidate for two BWS listings
+    listings = [
+        L(BWS, "1", "Sapporo Premium Lager Bottles 355ml"),
+        L(BWS, "2", "Sapporo Original Bottles 355ml"),
+        L(LL, "3", "Sapporo Bottles 355mL"),
+    ]
+    clusters, review = match_listings(listings)
+    assert all(len(c.retailers) == 1 for c in clusters)
+    assert review
+
+
+def test_descriptor_match_respects_abv_conflict():
+    a = L(BWS, "1", "Foo Premium Bottle 330ml", abv=4.0)
+    b = L(LL, "2", "Foo Bottle 330mL", abv=5.0)
+    clusters, _ = match_listings([a, b])
+    assert len(clusters) == 2
+
+
+def test_override_forces_merge_and_blocks():
+    a = L(BWS, "1", "Mountain Culture Juice Trip Cans 355ml")
+    b = L(LL, "2", "Mountain Culture Juice Trip Fruit Hazy Can 355mL")
+    forced = Overrides(merge=[((BWS, "1"), (LL, "2"))])
+    clusters, _ = match_listings([a, b], overrides=forced)
+    assert len(clusters) == 1
+
+    x = L(BWS, "3", "Sapporo Premium Lager Bottles 355ml")
+    y = L(LL, "4", "Sapporo Bottles 355mL")
+    never = Overrides(never={frozenset(((BWS, "3"), (LL, "4")))})
+    clusters, review = match_listings([x, y], overrides=never)
+    assert len(clusters) == 2 and review == []
+
+
+def test_load_overrides_csv(tmp_path):
+    p = tmp_path / "o.csv"
+    p.write_text(
+        "action,retailer_a,sku_a,retailer_b,sku_b\n"
+        "merge,bws,1,liquorland,2\n"
+        "never_merge,bws,3,liquorland,4\n"
+    )
+    o = load_overrides(p)
+    assert o.merge == [((BWS, "1"), (LL, "2"))]
+    assert o.blocked((LL, "4"), (BWS, "3"))
+    assert load_overrides(tmp_path / "missing.csv").merge == []
+
+    p.write_text("action,retailer_a,sku_a,retailer_b,sku_b\nmaybe,bws,1,liquorland,2\n")
+    with pytest.raises(ValueError):
+        load_overrides(p)
