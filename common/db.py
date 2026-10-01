@@ -12,6 +12,11 @@ CREATE TABLE IF NOT EXISTS products (
     abv_source TEXT
 );
 
+CREATE TABLE IF NOT EXISTS meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+
 CREATE TABLE IF NOT EXISTS locations (
     location_key TEXT PRIMARY KEY,
     retailer TEXT NOT NULL,
@@ -286,3 +291,17 @@ def save_matches(conn, clusters):
 
     conn.commit()
     return saved
+
+
+def set_meta(conn, key, value):
+    conn.execute(
+        "INSERT INTO meta (key, value) VALUES (?, ?) "
+        "ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+    conn.commit()
+
+
+def get_meta(conn, key, default=None):
+    row = conn.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+    return row["value"] if row else default

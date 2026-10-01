@@ -17,6 +17,16 @@ Run tests: `pip install -r requirements-dev.txt && pytest`. Parser fixtures live
 
 Notes: headless Chromium is blocked by Cloudflare, so the default is headed (`--headless` tries headless first and falls back). Space runs far apart; repeated runs get blocked. Set `BEEROO_CHROMIUM_PATH` to use a specific Chromium build.
 
+## Running the web app
+
+```bash
+python scripts/build_demo_db.py --raw     # demo DB: real current prices + SIMULATED history (flagged in the UI)
+BEEROO_DB=data/demo.sqlite3 uvicorn app.main:app --reload
+# open http://127.0.0.1:8000  (API docs at /api/docs)
+```
+
+Without `BEEROO_DB` it serves `data/beeroo.sqlite3` (real data only, history starts when you first collect). API: `GET /api/compare?postcode=2606&sort=value&pack=case&q=...`, `GET /api/products/{id}?postcode=...`, `GET /api/locations?postcode=...`. A postcode maps to a state; each retailer's prices come from a same-state location if loaded, otherwise a fallback that the UI flags.
+
 ## Ingesting captured data (BWS, Liquorland) and matching
 
 Liquorland/BWS data comes from manual browser captures (see `docs/CAPTURE_GUIDE.md`), loaded with:

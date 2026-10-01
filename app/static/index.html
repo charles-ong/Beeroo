@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en-AU">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Beeroo – compare beer prices by postcode</title>
+<meta name="description" content="Compare Dan Murphy's, BWS and Liquorland beer prices, price per standard drink, and price history for your postcode.">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header class="top">
+  <div class="wrap">
+    <h1>Beeroo</h1>
+    <p class="tag">Compare beer prices &amp; value per standard drink across Dan Murphy's, BWS and Liquorland.</p>
+    <form id="postcode-form" class="postcode" novalidate>
+      <label for="postcode">Your postcode</label>
+      <div class="row">
+        <input id="postcode" inputmode="numeric" maxlength="4" autocomplete="postal-code" placeholder="e.g. 2606" aria-describedby="postcode-error">
+        <button type="submit">Compare</button>
+      </div>
+      <p id="postcode-error" class="error" role="alert" hidden></p>
+    </form>
+  </div>
+</header>
+
+<main class="wrap">
+  <div id="demo-banner" class="banner demo" hidden>
+    <strong>Demo data.</strong> Current prices come from real captures, but the price history shown is <em>simulated</em> for development.
+  </div>
+  <div id="notices"></div>
+  <p id="stores" class="stores"></p>
+
+  <section id="filters" class="filters" hidden aria-label="Filters">
+    <label class="f grow">Search <input id="q" type="search" placeholder="e.g. carlton dry"></label>
+    <label class="f">Sort by
+      <select id="sort">
+        <option value="value">Best value ($/standard drink)</option>
+        <option value="unit_price">Lowest price per can/bottle</option>
+        <option value="abv">Highest ABV</option>
+        <option value="name">Name A–Z</option>
+      </select>
+    </label>
+    <label class="f">Pack
+      <select id="pack">
+        <option value="">Any</option><option value="single">Single</option>
+        <option value="pack">Packs</option><option value="case">Cases</option>
+      </select>
+    </label>
+    <label class="f small">Min ABV <input id="min_abv" type="number" min="0" max="100" step="0.1"></label>
+    <label class="f small">Max ABV <input id="max_abv" type="number" min="0" max="100" step="0.1"></label>
+    <label class="chk"><input id="include_member" type="checkbox"> Include member / app offers</label>
+    <label class="chk"><input id="multi" type="checkbox"> Only products at 2+ retailers</label>
+  </section>
+
+  <p id="summary" class="summary" aria-live="polite"></p>
+  <div id="results"></div>
+  <div class="pager"><button id="more" hidden>Show more</button></div>
+</main>
+
+<dialog id="detail" aria-labelledby="detail-title">
+  <div class="dlg">
+    <button class="close" id="detail-close" aria-label="Close">×</button>
+    <div id="detail-body"></div>
+  </div>
+</dialog>
+
+<footer class="wrap foot">
+  <details>
+    <summary>How value is calculated</summary>
+    <p>An Australian standard drink contains 10 g of alcohol. Standard drinks = volume (litres) × ABV% × 0.789. Price per standard drink = pack price ÷ total standard drinks in the pack. It's a value comparison tool, not a recommendation to drink more.</p>
+    <p>Where a retailer doesn't publish ABV we only show a value figure if the same product at another retailer does, and we say so. Otherwise it shows "ABV unknown".</p>
+    <p>Prices are shelf prices for the nearest store or state we have data for, as last collected (see "updated" times) and may have changed. Member / app offers are hidden unless you tick the box. Always check the retailer's site before buying.</p>
+  </details>
+  <p>Prices belong to the retailers named and link to their product pages. Beeroo isn't affiliated with Dan Murphy's, BWS or Liquorland.</p>
+  <p><strong>Drink responsibly.</strong> You must be 18+ to purchase alcohol. For support see <a href="https://drinkwise.org.au" rel="noopener">drinkwise.org.au</a>.</p>
+</footer>
+<script src="/static/app.js"></script>
+</body>
+</html>
