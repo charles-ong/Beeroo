@@ -68,3 +68,18 @@ class PriceObservation(BaseModel):
 class ScrapedProduct(BaseModel):
     listing: Listing
     prices: list[PriceObservation]
+
+
+class Location(BaseModel):
+    """The store/area a set of prices applies to."""
+
+    retailer: Retailer
+    store_id: str
+    store_name: Optional[str] = None
+    suburb: Optional[str] = None
+    state: Optional[str] = None
+    postcode: Optional[str] = None
+
+    @property
+    def location_key(self):
+        return f"{self.retailer.value}:{self.store_id}"

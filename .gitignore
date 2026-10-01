@@ -6,3 +6,4 @@ data/*.json
 *_debug.html
 *_debug.png
 *.sqlite3
+data/*.png

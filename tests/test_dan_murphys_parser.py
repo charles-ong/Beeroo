@@ -4,7 +4,7 @@ import pytest
 
 from common.normalise import legacy_to_scraped_products
 from common.parsing import merge_split_price_lines
-from scrapers.dan_murphys import scrape_main_products_html
+from scrapers.dan_murphys_legacy import scrape_main_products_html
 
 FIXTURE = Path(__file__).parent / "fixtures" / "dan_murphys_beer_listing.html"
 

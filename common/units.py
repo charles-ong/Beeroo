@@ -7,9 +7,9 @@ import re
 
 ETHANOL_DENSITY = 0.789
 
-_VOLUME_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(mL|ml|L|l)\b")
+_VOLUME_RE = re.compile(r"(\d+(?:\.\d+)?)\s*(ml|l)\b", re.IGNORECASE)
 _MULTI_VOLUME_RE = re.compile(
-    r"\b(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*(mL|ml|L)\b", re.IGNORECASE
+    r"\b(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*(ml|l)\b", re.IGNORECASE
 )
 _ABV_RE = re.compile(r"(\d+(?:\.\d+)?)\s*%")
 

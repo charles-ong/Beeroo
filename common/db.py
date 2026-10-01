@@ -16,7 +16,9 @@ CREATE TABLE IF NOT EXISTS locations (
     retailer TEXT NOT NULL,
     state TEXT,
     postcode TEXT,
-    store_id TEXT
+    store_id TEXT,
+    store_name TEXT,
+    suburb TEXT
 );
 
 CREATE TABLE IF NOT EXISTS listings (
@@ -58,6 +60,31 @@ def connect(path=":memory:"):
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
     return conn
+
+
+def upsert_location(conn, location):
+    conn.execute(
+        """
+        INSERT INTO locations
+            (location_key, retailer, state, postcode, store_id, store_name,
+             suburb)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT (location_key) DO UPDATE SET
+            state = excluded.state,
+            postcode = excluded.postcode,
+            store_name = excluded.store_name,
+            suburb = excluded.suburb
+        """,
+        (
+            location.location_key,
+            location.retailer.value,
+            location.state,
+            location.postcode,
+            location.store_id,
+            location.store_name,
+            location.suburb,
+        ),
+    )
 
 
 def upsert_listing(conn, listing, now):

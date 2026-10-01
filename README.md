@@ -10,10 +10,12 @@ Compare beer prices, price per standard drink, and price history across Dan Murp
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 playwright install chromium
-python main.py   # writes data/dan_murphys_beer.json
+python main.py --postcode 3000   # scrapes Dan Murphy's beer into data/beeroo.sqlite3
 ```
 
 Run tests: `pip install -r requirements-dev.txt && pytest`. Parser fixtures live in `tests/fixtures/`.
+
+Notes: headless Chromium is blocked by Cloudflare, so the default is headed (`--headless` tries headless first and falls back). Space runs far apart; repeated runs get blocked. Set `BEEROO_CHROMIUM_PATH` to use a specific Chromium build.
 
 ## Standard drinks
 
