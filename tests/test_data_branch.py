@@ -189,3 +189,8 @@ def test_ingest_inbox_ingests_a_real_page_and_deletes_it(tmp_path):
     conn = db.connect(str(dbfile))
     assert conn.execute("SELECT COUNT(*) FROM listings").fetchone()[0] == 24
     assert conn.execute("SELECT COUNT(*) FROM price_observations").fetchone()[0] > 0
+
+
+def test_an_unreachable_remote_is_an_error_not_an_empty_branch(tmp_path):
+    with pytest.raises(dbr.DataBranchError):
+        dbr.clone(str(tmp_path / "nothing-here.git"), tmp_path / "c")

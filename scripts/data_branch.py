@@ -63,11 +63,12 @@ def clone(remote, dest):
     otherwise leaves an empty repo ready for a first (orphan) commit."""
     dest = Path(dest)
     shutil.rmtree(dest, ignore_errors=True)
-    proc = git(["clone", "--quiet", "--depth", "1", "--branch", BRANCH, "--single-branch", remote, str(dest)],
-               cwd=dest.parent, remote=remote, check=False)
-    if proc.returncode == 0:
+    # A missing branch is normal on day one; any other failure (no access, no network) is not.
+    listing = git(["ls-remote", "--heads", remote, BRANCH], cwd=dest.parent, remote=remote)
+    if listing.stdout.strip():
+        git(["clone", "--quiet", "--depth", "1", "--branch", BRANCH, "--single-branch", remote, str(dest)],
+            cwd=dest.parent, remote=remote)
         return True
-    shutil.rmtree(dest, ignore_errors=True)
     dest.mkdir(parents=True)
     git(["init", "--quiet", "-b", BRANCH], cwd=dest)
     git(["remote", "add", "origin", remote], cwd=dest)
@@ -130,6 +131,7 @@ def save(remote, clone_dir, db_path, state_path=None, attempts=4):
     tip = tip.stdout.strip() if tip.returncode == 0 else None
     seen = head_files(clone_dir, "inbox") if tip else set()
 
+    last_error = ""
     for attempt in range(attempts):
         work = Path(tempfile.mkdtemp(prefix="beeroo-data-"))
         try:
@@ -159,10 +161,11 @@ def save(remote, clone_dir, db_path, state_path=None, attempts=4):
             proc = _commit_all(repo, "Update Beeroo data", remote, force_lease=tip)
             if proc.returncode == 0:
                 return True
+            last_error = (proc.stderr or proc.stdout).strip().replace(remote, "<remote>")
         finally:
             shutil.rmtree(work, ignore_errors=True)
 
-    raise DataBranchError("could not update the data branch (kept losing a race); try again")
+    raise DataBranchError(f"could not update the data branch after {attempts} tries; last git message: {last_error}")
 
 
 def seed(remote, db_path, replace=False):

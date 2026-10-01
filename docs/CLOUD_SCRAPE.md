@@ -19,7 +19,7 @@ freshness report says so. Cost: $0 (check GitHub's and Cloudflare's current free
    `.github/workflows/daily-scrape.yml`.
 2. **Seed the cloud database with your existing price history**, from this folder:
    ```bash
-   BEEROO_DATA_REMOTE=git@github.com:charles-ong/Beeroo.git .venv/bin/python scripts/data_branch.py seed --db data/beeroo.sqlite3
+   BEEROO_DATA_REMOTE=https://github.com/charles-ong/Beeroo.git .venv/bin/python scripts/data_branch.py seed --db data/beeroo.sqlite3
    ```
    It creates the `data` branch (one commit: the database). It refuses to overwrite an existing one; if a cloud
    run already saved a thinner database before you seeded, add `--replace` to replace it with your local history.
@@ -33,11 +33,11 @@ freshness report says so. Cost: $0 (check GitHub's and Cloudflare's current free
    policy or branch protection on `data` can block it. Don't protect the `data` branch.
 5. **Switch your Mac to Dan Murphy's only**: put this in `~/.config/beeroo/env` (`chmod 600` it):
    ```
-   BEEROO_DATA_REMOTE=git@github.com:charles-ong/Beeroo.git
+   BEEROO_DATA_REMOTE=https://github.com/charles-ong/Beeroo.git
    ```
    With that set, `scripts/daily_run.sh` scrapes only Dan Murphy's, pushes the pages and stops: it no longer
-   scrapes BWS/Liquorland, exports or publishes. The Mac needs git access to the repo (SSH key or the macOS
-   keychain). launchd needs no change.
+   scrapes BWS/Liquorland, exports or publishes. The Mac needs git access to the repo. The `https://` URL uses the same saved login as your
+   normal `git push`; the `git@github.com:` form only works if you have an SSH key registered with GitHub. launchd needs no change.
 6. **Try it**: Actions → Daily cloud scrape → Run workflow. Read the run summary (a table per state, then freshness).
 
 ## Day to day
