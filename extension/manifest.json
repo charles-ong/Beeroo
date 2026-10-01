@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "Beeroo Price Contributor",
+  "version": "0.1.0",
+  "description": "Optionally share the beer prices you see on Dan Murphy's, BWS and Liquorland (logged out) to help everyone compare. Opt-in, no account, nothing hidden.",
+  "minimum_chrome_version": "111",
+  "permissions": ["storage"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "optional_host_permissions": ["https://*/*"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.danmurphys.com.au/*",
+        "https://www.bws.com.au/*",
+        "https://bws.com.au/*",
+        "https://www.liquorland.com.au/*"
+      ],
+      "js": ["inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://www.danmurphys.com.au/*",
+        "https://www.bws.com.au/*",
+        "https://bws.com.au/*",
+        "https://www.liquorland.com.au/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": { "default_popup": "popup.html", "default_title": "Beeroo Price Contributor" },
+  "options_ui": { "page": "options.html", "open_in_tab": true }
+}

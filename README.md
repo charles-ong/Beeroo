@@ -29,7 +29,7 @@ Without `BEEROO_DB` it serves `data/beeroo.sqlite3` (real data only, history sta
 
 ## Contributions (crowdsourced prices)
 
-`POST /api/contrib` accepts consented price contributions with quorum-based promotion; see `docs/CONTRIBUTION_API.md`. In production set `BEEROO_SALT` and `BEEROO_ADMIN_TOKEN`, run `uvicorn --no-access-log`, and run `python scripts/promote_contributions.py` daily.
+`POST /api/contrib` accepts consented price contributions (a prototype Chrome extension lives in `extension/`; see its README) with quorum-based promotion; see `docs/CONTRIBUTION_API.md`. In production set `BEEROO_SALT` and `BEEROO_ADMIN_TOKEN`, run `uvicorn --no-access-log`, and run `python scripts/promote_contributions.py` daily.
 
 ## Ingesting captured data (BWS, Liquorland) and matching
 
