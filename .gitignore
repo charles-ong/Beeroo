@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+data/*.json
+*_debug.html
+*_debug.png
+*.sqlite3
