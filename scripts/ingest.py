@@ -17,8 +17,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from common import db  # noqa: E402
-from common.matching import match_listings  # noqa: E402
+from common import db, pipeline  # noqa: E402
 from common.records import Location, Retailer  # noqa: E402
 from scrapers import bws, endeavour, liquorland  # noqa: E402
 
@@ -69,12 +68,7 @@ def ingest_files(conn, retailer, files, location, override=None):
     return total_products, inserted, errors
 
 
-def run_matching(conn):
-    listings = [item for _, _, item in db.load_listings(conn)]
-    clusters, review = match_listings(listings)
-    saved = db.save_matches(conn, clusters)
-    multi = [c for c in clusters if len(c.retailers) > 1]
-    return saved, len(multi), review
+run_matching = pipeline.run_matching
 
 
 def main(argv=None):

@@ -27,6 +27,10 @@ BEEROO_DB=data/demo.sqlite3 uvicorn app.main:app --reload
 
 Without `BEEROO_DB` it serves `data/beeroo.sqlite3` (real data only, history starts when you first collect). API: `GET /api/compare?postcode=2606&sort=value&pack=case&q=...`, `GET /api/products/{id}?postcode=...`, `GET /api/locations?postcode=...`. A postcode maps to a state; each retailer's prices come from a same-state location if loaded, otherwise a fallback that the UI flags.
 
+## Contributions (crowdsourced prices)
+
+`POST /api/contrib` accepts consented price contributions with quorum-based promotion; see `docs/CONTRIBUTION_API.md`. In production set `BEEROO_SALT` and `BEEROO_ADMIN_TOKEN`, run `uvicorn --no-access-log`, and run `python scripts/promote_contributions.py` daily.
+
 ## Ingesting captured data (BWS, Liquorland) and matching
 
 Liquorland/BWS data comes from manual browser captures (see `docs/CAPTURE_GUIDE.md`), loaded with:

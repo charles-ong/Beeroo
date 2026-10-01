@@ -7,11 +7,15 @@ import re
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import FileResponse
+import hmac
+import json
+
+from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi.responses import FileResponse, JSONResponse
+from pydantic import ValidationError
 from fastapi.staticfiles import StaticFiles
 
-from app import queries
+from app import contrib, queries
 from common import db
 
 STATIC = Path(__file__).parent / "static"
@@ -86,6 +90,59 @@ def create_app(db_path=None):
             raise HTTPException(404, "Product not found for this postcode.")
 
         return detail
+
+    @app.post("/api/contrib")
+    async def contribute(request: Request):
+        """Accept a consented price contribution. See docs/CONTRIBUTION_API.md."""
+        declared = request.headers.get("content-length")
+        if declared and declared.isdigit() and int(declared) > contrib.MAX_BODY_BYTES:
+            raise HTTPException(413, "payload too large")
+
+        raw = await request.body()
+        if len(raw) > contrib.MAX_BODY_BYTES:
+            raise HTTPException(413, "payload too large")
+
+        try:
+            body = contrib.ContributionIn.model_validate(json.loads(raw))
+        except (ValueError, ValidationError) as e:
+            detail = "invalid contribution"
+            if isinstance(e, ValidationError):
+                first = e.errors()[0]
+                detail = f"invalid contribution: {'.'.join(str(x) for x in first['loc'])}: {first['msg']}"
+            raise HTTPException(422, detail)
+
+        conn = connection()
+        try:
+            result = contrib.accept_contribution(conn, body)
+        except contrib.ContribError as e:
+            raise HTTPException(e.status, e.message)
+        finally:
+            conn.close()
+
+        return JSONResponse(result, status_code=200 if result["status"] == "duplicate" else 202)
+
+    @app.get("/api/contrib/health")
+    def contrib_health():
+        conn = connection()
+        try:
+            return contrib.health(conn)
+        finally:
+            conn.close()
+
+    @app.post("/api/contrib/promote")
+    def contrib_promote(x_admin_token: Optional[str] = Header(default=None)):
+        """Run a full promotion + expiry pass (for a scheduled job)."""
+        expected = os.environ.get("BEEROO_ADMIN_TOKEN")
+        if not expected or not x_admin_token or not hmac.compare_digest(expected, x_admin_token):
+            raise HTTPException(403, "forbidden")
+
+        conn = connection()
+        try:
+            stats = contrib.promote(conn)
+            stats["expired"] = contrib.expire(conn)
+            return stats
+        finally:
+            conn.close()
 
     @app.get("/")
     def index():
