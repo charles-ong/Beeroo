@@ -65,48 +65,6 @@ def test_backup_of_missing_database_fails_cleanly(tmp_path):
         backup_db.backup(tmp_path / "nope.sqlite3", tmp_path / "b")
 
 
-# ---- wrapper script ---------------------------------------------------------
-
-
-@pytest.fixture()
-def fake_repo(tmp_path):
-    (tmp_path / "scripts").mkdir()
-    shutil.copy(ROOT / "scripts" / "run_scrape.sh", tmp_path / "scripts" / "run_scrape.sh")
-    py = tmp_path / ".venv" / "bin" / "python"
-    py.parent.mkdir(parents=True)
-    py.write_text('#!/bin/sh\necho "args=$* token=${BEEROO_ADMIN_TOKEN:-unset}"\n')
-    py.chmod(0o755)
-    return tmp_path
-
-
-def run_wrapper(repo, env_file, *args):
-    env = {"PATH": os.environ["PATH"], "HOME": str(repo), "BEEROO_ENV_FILE": str(env_file)}
-    return subprocess.run([SH, str(repo / "scripts" / "run_scrape.sh"), *args], capture_output=True, text=True, env=env)
-
-
-def test_wrapper_loads_secrets_from_a_private_env_file(fake_repo):
-    env_file = fake_repo / "env"
-    env_file.write_text("BEEROO_ADMIN_TOKEN=s3cr3t\n")
-    env_file.chmod(0o600)
-    r = run_wrapper(fake_repo, env_file, "--push")
-    assert r.returncode == 0 and "args=" in r.stdout
-    assert r.stdout.strip().endswith("--push token=s3cr3t") or "token=s3cr3t" in r.stdout
-
-
-def test_wrapper_refuses_a_group_or_world_readable_env_file(fake_repo):
-    env_file = fake_repo / "env"
-    env_file.write_text("BEEROO_ADMIN_TOKEN=s3cr3t\n")
-    env_file.chmod(0o644)
-    r = run_wrapper(fake_repo, env_file)
-    assert r.returncode != 0 and "chmod 600" in r.stderr
-    assert "s3cr3t" not in r.stdout + r.stderr
-
-
-def test_wrapper_runs_without_an_env_file(fake_repo):
-    r = run_wrapper(fake_repo, fake_repo / "missing")
-    assert r.returncode == 0 and "token=unset" in r.stdout
-
-
 # ---- launchd ----------------------------------------------------------------
 
 
@@ -149,7 +107,7 @@ def test_plist_passes_plutil_lint(tmp_path):
 
 
 def test_web_app_imports_without_scraper_only_dependencies():
-    code = ("import sys; sys.modules['playwright']=None; sys.modules['bs4']=None; "
+    code = ("import sys; sys.modules['playwright']=None; "
             "import app.main; print('ok')")
     r = subprocess.run([sys.executable, "-c", code], cwd=ROOT, capture_output=True, text=True)
     assert r.stdout.strip() == "ok", r.stderr
@@ -170,7 +128,7 @@ def test_dockerfile_is_locked_down():
     assert "EXPOSE 8080" in text
     for secret in ("BEEROO_SALT", "BEEROO_ADMIN_TOKEN", "playwright"):
         assert secret not in text
-    assert "COPY scripts/promote_contributions.py scripts/backup_db.py scripts/" in text
+    assert "COPY scripts/backup_db.py scripts/" in text and "promote" not in text
 
 
 def test_dockerignore_keeps_data_and_secrets_out_of_the_image():
@@ -183,7 +141,7 @@ def test_fly_config():
     cfg = tomllib.loads((ROOT / "fly.toml").read_text())
     assert cfg["http_service"]["internal_port"] == 8080 and cfg["http_service"]["force_https"] is True
     assert cfg["mounts"][0]["destination"] == "/data" and cfg["env"]["BEEROO_DB"].startswith("/data/")
-    assert cfg["env"]["BEEROO_CONTRIB_ENABLED"] == "0"
+    assert "BEEROO_CONTRIB_ENABLED" not in cfg["env"]
     assert cfg["http_service"]["min_machines_running"] == 1
     assert cfg["http_service"]["checks"][0]["path"] == "/healthz"
     flat = (ROOT / "fly.toml").read_text()
@@ -194,45 +152,7 @@ def test_workflows_never_inline_secrets():
     for wf in (ROOT / ".github" / "workflows").glob("*.yml"):
         text = wf.read_text()
         assert not re.search(r"token\s*[:=]\s*['\"]?[A-Za-z0-9]{20,}", text, re.I), wf.name
-    assert "${{ secrets.BEEROO_ADMIN_TOKEN }}" in (ROOT / ".github" / "workflows" / "promote.yml").read_text()
-
-
-# ---- push_captures ----------------------------------------------------------
-
-
-def test_push_captures_builds_bodies_with_capture_time_and_location(tmp_path, capsys):
-    import push_captures
-    f = ROOT / "tests" / "fixtures" / "bws_2606_products.json"
-    sent = []
-    push_captures.main(
-        ["bws", "--set-pickup", str(ROOT / "tests/fixtures/bws_2606_set_pickup.json"), str(f)],
-        push=lambda b: sent.append(b) or {"products": 14, "new_observations": 50, "new_listings": 14},
-    )
-    (body,) = sent
-    assert body["kind"] == "bws_products" and body["location"]["store_id"] == "6723"
-    assert datetime.fromisoformat(body["observed_at"]).timestamp() == pytest.approx(f.stat().st_mtime, abs=1)
-    assert "'new_listings': 14" in capsys.readouterr().out
-
-
-def test_push_captures_validates_required_location_flags(tmp_path):
-    import push_captures
-    f = str(ROOT / "tests/fixtures/bws_2606_products.json")
-    with pytest.raises(SystemExit, match="set-pickup"):
-        push_captures.main(["bws", f], push=lambda b: {})
-    with pytest.raises(SystemExit, match="store-id"):
-        push_captures.main(["dan_murphys", f], push=lambda b: {})
-    sent = []
-    push_captures.main(["liquorland", str(ROOT / "tests/fixtures/liquorland_act_products.json")],
-                       push=lambda b: sent.append(b) or {})
-    assert sent[0]["location"] is None and sent[0]["kind"] == "liquorland_products"
-
-
-def test_push_captures_needs_server_settings(monkeypatch):
-    import push_captures
-    monkeypatch.delenv("BEEROO_SERVER", raising=False)
-    monkeypatch.delenv("BEEROO_ADMIN_TOKEN", raising=False)
-    with pytest.raises(SystemExit, match="BEEROO_SERVER"):
-        push_captures.main(["liquorland", str(ROOT / "tests/fixtures/liquorland_act_products.json")])
+    assert not (ROOT / ".github" / "workflows" / "promote.yml").exists()
 
 
 # ---- publish_pages.sh (against a real local git remote) ----------------------
@@ -356,8 +276,8 @@ def test_freshness_report(tmp_path):
         conn.execute("INSERT INTO price_observations (listing_id, location_key, pack_type, units, member_only, price, observed_at) VALUES (?, ?, 'single', 1, 0, 5, ?)", (i + 1, key, ts))
     conn.commit()
     got = {(c, r): (s, a) for c, r, s, a in check_freshness.freshness(conn, now=now, max_age_days=3)}
-    assert got[("Canberra (ACT)", "bws")] == ("ok", 1.0)
-    assert got[("Perth (WA)", "bws")][0] == "STALE"
-    assert got[("Canberra (ACT)", "liquorland")][0] == "STALE"
-    assert got[("Sydney (NSW)", "dan_murphys")] == ("MISSING", None)
-    assert len(got) == 12                                                      # 4 cities x 3 retailers
+    assert got[("Australian Capital Territory (ACT)", "bws")] == ("ok", 1.0)
+    assert got[("Western Australia (WA)", "bws")][0] == "STALE"
+    assert got[("Australian Capital Territory (ACT)", "liquorland")][0] == "STALE"
+    assert got[("New South Wales (NSW)", "dan_murphys")] == ("MISSING", None)
+    assert len(got) == 24                                                      # 8 states and territories x 3 retailers

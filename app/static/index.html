@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Beeroo – compare beer prices by postcode</title>
-<meta name="description" content="Compare Dan Murphy's, BWS and Liquorland beer prices, price per standard drink, and price history for your postcode.">
+<title>Beeroo – compare beer prices by state</title>
+<meta name="description" content="Compare Dan Murphy's, BWS and Liquorland beer prices, price per standard drink, and price history for your state or territory.">
 <link rel="stylesheet" href="static/style.css">
 </head>
 <body>
@@ -12,14 +12,16 @@
   <div class="wrap">
     <h1>Beeroo</h1>
     <p class="tag">Compare beer prices &amp; value per standard drink across Dan Murphy's, BWS and Liquorland.</p>
-    <form id="postcode-form" class="postcode" novalidate>
-      <label for="postcode">Your postcode</label>
+    <div class="postcode">
+      <label for="state">Your state or territory</label>
       <div class="row">
-        <input id="postcode" inputmode="numeric" maxlength="4" autocomplete="postal-code" placeholder="e.g. 2606" aria-describedby="postcode-error">
-        <button type="submit">Compare</button>
+        <select id="state" aria-describedby="state-help state-error">
+          <option value="">Choose…</option>
+        </select>
       </div>
-      <p id="postcode-error" class="error" role="alert" hidden></p>
-    </form>
+      <p id="state-help" class="muted small">Prices come from the store nearest <span id="state-postcode">the postcode we use for that state</span>.</p>
+      <p id="state-error" class="error" role="alert" hidden></p>
+    </div>
   </div>
 </header>
 

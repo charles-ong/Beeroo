@@ -80,9 +80,9 @@ def test_multibuy_on_cartons_counts_cartons(act):
     assert xxxx[(PackType.CASE, 24, False)] == 55.0
 
 
-def test_block_cans_are_packs_not_cases(act):
-    gnb = series(act[0]["2605953"])  # 30-block cans
-    assert (PackType.PACK, 30, False) in gnb
+def test_thirty_block_cans_are_a_case_under_the_shared_rule(act):
+    gnb = series(act[0]["2605953"])  # 30-block cans: 12 or more units is a "case" at every retailer
+    assert (PackType.CASE, 30, False) in gnb
 
 
 def test_prices_differ_by_state(act, wa):

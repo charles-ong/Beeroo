@@ -76,10 +76,16 @@ class BrowseCollector:
 
 
 async def raise_if_blocked(page, response=None):
+    """Raise Blocked if the page is a bot-protection / CAPTCHA page. We never try
+    to solve or get past these: the caller stops and backs off."""
     title = await page.title()
+    url = page.url or ""
 
-    if (response is not None and response.status == 403) or (
-        "Attention Required" in title
+    if (
+        (response is not None and response.status in (403, 429))
+        or "Attention Required" in title
+        or "captcha" in title.lower()
+        or "perfdrive" in url            # Liquorland's ShieldSquare challenge host
     ):
         raise Blocked(f"bot protection page served (title={title!r})")
 

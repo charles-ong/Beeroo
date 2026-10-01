@@ -1,25 +1,27 @@
 """Beeroo web app: JSON API + static single-page frontend.
 
     uvicorn app.main:app --reload            # uses $BEEROO_DB or data/beeroo.sqlite3
+
+The free setup doesn't run this at all (it publishes a static export instead,
+see docs/FREE_HOSTING.md); this server is for local use and the optional paid
+deployment.
 """
+import hmac
+import json
 import os
-import re
 from pathlib import Path
 from typing import Optional
 
-import hmac
-import json
-
 from fastapi import FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import ValidationError
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import ValidationError
 
-from app import contrib, queries
+from app import ingest, queries
 from common import db
+from common.states import normalise_state, state_list
 
 STATIC = Path(__file__).parent / "static"
-POSTCODE_RE = re.compile(r"^\d{4}$")
 
 
 def create_app(db_path=None):
@@ -27,15 +29,11 @@ def create_app(db_path=None):
     production = os.environ.get("BEEROO_ENV") == "production"
 
     if production:
-        missing = [k for k in ("BEEROO_SALT", "BEEROO_ADMIN_TOKEN") if not os.environ.get(k)]
-        if missing:
-            raise RuntimeError(f"production needs {', '.join(missing)} to be set")
-        if len(os.environ["BEEROO_ADMIN_TOKEN"]) < 24:
+        token = os.environ.get("BEEROO_ADMIN_TOKEN")
+        if not token:
+            raise RuntimeError("production needs BEEROO_ADMIN_TOKEN to be set")
+        if len(token) < 24:
             raise RuntimeError("BEEROO_ADMIN_TOKEN must be at least 24 characters")
-
-    # Public contributions stay closed in production until explicitly enabled
-    # (retailer terms of use haven't been reviewed yet).
-    contrib_open = os.environ.get("BEEROO_CONTRIB_ENABLED", "0" if production else "1") == "1"
 
     app = FastAPI(
         title="Beeroo",
@@ -66,24 +64,28 @@ def create_app(db_path=None):
     def connection():
         return db.connect(db_path)
 
-    def checked_postcode(postcode):
-        if not POSTCODE_RE.match(postcode):
-            raise HTTPException(400, "Enter a valid 4-digit Australian postcode.")
-        return postcode
+    def checked_state(value):
+        code = normalise_state(value)
+        if code is None:
+            raise HTTPException(400, "Choose a valid state or territory.")
+        return code
+
+    @app.get("/api/states")
+    def states():
+        """The state/territory dropdown, with the postcode each is priced from."""
+        return {"states": state_list()}
 
     @app.get("/api/locations")
-    def locations(postcode: str):
+    def locations(state: str):
         conn = connection()
         try:
-            return queries.resolve_locations(conn, checked_postcode(postcode))
-        except ValueError as e:
-            raise HTTPException(400, str(e))
+            return queries.resolve_locations(conn, checked_state(state))
         finally:
             conn.close()
 
     @app.get("/api/compare")
     def compare(
-        postcode: str,
+        state: str,
         q: str = "",
         sort: str = "value",
         pack: Optional[str] = None,
@@ -103,7 +105,7 @@ def create_app(db_path=None):
         conn = connection()
         try:
             return queries.compare(
-                conn, checked_postcode(postcode), q=q, sort=sort, pack_type=pack,
+                conn, checked_state(state), q=q, sort=sort, pack_type=pack,
                 include_member=include_member, retailers=retailer or None,
                 min_abv=min_abv, max_abv=max_abv, min_retailers=min_retailers,
                 limit=limit, offset=offset,
@@ -114,82 +116,27 @@ def create_app(db_path=None):
             conn.close()
 
     @app.get("/api/products/{product_id}")
-    def product(product_id: int, postcode: str):
+    def product(product_id: int, state: str):
         conn = connection()
         try:
-            detail = queries.product_detail(conn, product_id, checked_postcode(postcode))
-        except ValueError as e:
-            raise HTTPException(400, str(e))
+            detail = queries.product_detail(conn, product_id, checked_state(state))
         finally:
             conn.close()
 
         if detail is None:
-            raise HTTPException(404, "Product not found for this postcode.")
+            raise HTTPException(404, "Product not found for this state.")
 
         return detail
 
-    @app.post("/api/contrib")
-    async def contribute(request: Request):
-        """Accept a consented price contribution. See docs/CONTRIBUTION_API.md."""
-        if not contrib_open:
-            raise HTTPException(503, "contributions are not open yet")
-        declared = request.headers.get("content-length")
-        if declared and declared.isdigit() and int(declared) > contrib.MAX_BODY_BYTES:
-            raise HTTPException(413, "payload too large")
-
-        raw = await request.body()
-        if len(raw) > contrib.MAX_BODY_BYTES:
-            raise HTTPException(413, "payload too large")
-
-        try:
-            body = contrib.ContributionIn.model_validate(json.loads(raw))
-        except (ValueError, ValidationError) as e:
-            detail = "invalid contribution"
-            if isinstance(e, ValidationError):
-                first = e.errors()[0]
-                detail = f"invalid contribution: {'.'.join(str(x) for x in first['loc'])}: {first['msg']}"
-            raise HTTPException(422, detail)
-
-        conn = connection()
-        try:
-            result = contrib.accept_contribution(conn, body)
-        except contrib.ContribError as e:
-            raise HTTPException(e.status, e.message)
-        finally:
-            conn.close()
-
-        return JSONResponse(result, status_code=200 if result["status"] == "duplicate" else 202)
-
-    @app.get("/api/contrib/health")
-    def contrib_health():
-        conn = connection()
-        try:
-            return contrib.health(conn)
-        finally:
-            conn.close()
-
-    @app.post("/api/contrib/promote")
-    def contrib_promote(x_admin_token: Optional[str] = Header(default=None)):
-        """Run a full promotion + expiry pass (for a scheduled job)."""
-        require_admin(x_admin_token)
-
-        conn = connection()
-        try:
-            stats = contrib.promote(conn)
-            stats["expired"] = contrib.expire(conn)
-            return stats
-        finally:
-            conn.close()
-
     @app.post("/api/admin/ingest")
     async def admin_ingest(request: Request, x_admin_token: Optional[str] = Header(default=None)):
-        """Trusted first-party ingest (our own scraper or captures). Admin token required."""
+        """Trusted first-party ingest (our own scraper). Admin token required."""
         require_admin(x_admin_token)
         raw = await request.body()
-        if len(raw) > 12_000_000:
+        if len(raw) > ingest.MAX_BODY_BYTES:
             raise HTTPException(413, "payload too large")
         try:
-            body = contrib.IngestIn.model_validate(json.loads(raw))
+            body = ingest.IngestIn.model_validate(json.loads(raw))
         except (ValueError, ValidationError) as e:
             detail = "invalid ingest request"
             if isinstance(e, ValidationError):
@@ -199,8 +146,8 @@ def create_app(db_path=None):
 
         conn = connection()
         try:
-            return contrib.ingest_trusted(conn, body)
-        except contrib.ContribError as e:
+            return ingest.ingest_trusted(conn, body)
+        except ingest.IngestError as e:
             raise HTTPException(e.status, e.message)
         finally:
             conn.close()

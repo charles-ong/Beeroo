@@ -1,58 +1,44 @@
 # Beeroo
 
-Compare beer prices, price per standard drink, and price history across Dan Murphy's, BWS and Liquorland by postcode.
+Compare beer prices, **price per standard drink**, and price history across **Dan Murphy's, BWS and Liquorland**.
 
-**Status:** early prototype. Only a Dan Murphy's beer scraper exists. See `MVP_PROMPT.md` for the MVP plan and `docs/ACCESS_NOTES.md` for retailer access/legal findings.
+You pick your **state or territory** from a dropdown. Every price is for the store nearest that state's pricing postcode (for example **2100** for NSW; the others use their capital city: see `common/states.py`). No postcode entry.
+
+## How it works (free, no server)
+
+```
+your computer, once a day:
+  scrape BWS + Liquorland + Dan Murphy's for every state/territory (visible browser)
+  -> local SQLite database -> static website -> free static host (GitHub/Cloudflare Pages)
+```
+
+- `scripts/scheduled_scrape.py`: the daily scrape. [docs/SCHEDULED_SCRAPE.md](docs/SCHEDULED_SCRAPE.md)
+- `scripts/export_static.py` + `scripts/publish_pages.sh`: build and publish the site. [docs/FREE_HOSTING.md](docs/FREE_HOSTING.md)
+- `scripts/daily_run.sh`: the whole chain (what the scheduler runs).
+- `scripts/check_freshness.py`: which state/retailer combinations are stale.
+- `app/`: the API + frontend (also used locally, or for the optional paid server in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)).
+- [docs/ACCESS_NOTES.md](docs/ACCESS_NOTES.md): what each retailer's site does, what's been verified live, and the data quirks found.
+
+**Read before relying on it:** the retailers' terms of use are unreviewed, Liquorland's `robots.txt` disallows the API its pages load (it's included at your request and can be switched off), and Dan Murphy's is blocked on the machine it was developed on. Details in the docs above.
 
 ## Setup
 
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-playwright install chromium
-python main.py --postcode 3000   # scrapes Dan Murphy's beer into data/beeroo.sqlite3
+pip install -r requirements.txt -r requirements-dev.txt
+playwright install chromium      # or set BEEROO_CHROMIUM_PATH to an existing Chromium
+pytest -q                        # 270+ tests
 ```
 
-Run tests: `pip install -r requirements-dev.txt && pytest`. Parser fixtures live in `tests/fixtures/`.
-
-Notes: headless Chromium is blocked by Cloudflare, so the default is headed (`--headless` tries headless first and falls back). Space runs far apart; repeated runs get blocked. Set `BEEROO_CHROMIUM_PATH` to use a specific Chromium build.
-
-## Running the web app
+Try one state by hand first (a browser window opens and you can watch it):
 
 ```bash
-python scripts/build_demo_db.py --raw     # demo DB: real current prices + SIMULATED history (flagged in the UI)
-BEEROO_DB=data/demo.sqlite3 uvicorn app.main:app --reload
-# open http://127.0.0.1:8000  (API docs at /api/docs)
+python scripts/scheduled_scrape.py --zone NSW --retailer bws
+python scripts/export_static.py && python3 -m http.server -d site 8000   # then open http://127.0.0.1:8000
 ```
 
-Without `BEEROO_DB` it serves `data/beeroo.sqlite3` (real data only, history starts when you first collect). API: `GET /api/compare?postcode=2606&sort=value&pack=case&q=...`, `GET /api/products/{id}?postcode=...`, `GET /api/locations?postcode=...`. A postcode maps to a state; each retailer's prices come from a same-state location if loaded, otherwise a fallback that the UI flags.
-
-## Free hosting and daily scraping
-
-The default setup costs nothing: your computer scrapes BWS and Dan Murphy's daily for Sydney, Canberra, Melbourne and Perth, exports a static website, and publishes it to a free static host. See `docs/FREE_HOSTING.md`, `docs/SCHEDULED_SCRAPE.md` and `docs/LIQUORLAND_MANUAL.md` (Liquorland is refreshed by hand).
-
-## Paid server option (not needed)
-
-`docs/DEPLOYMENT.md` describes a Docker/Fly.io server. Optional. Details:
-
-See `docs/DEPLOYMENT.md` (Docker/Fly.io, backups, security checklist) and `docs/SCHEDULED_SCRAPE.md` (daily headed run on your own Mac, with block backoff). The server never scrapes; trusted data arrives via `POST /api/admin/ingest`.
-
-## Contributions (crowdsourced prices)
-
-`POST /api/contrib` accepts consented price contributions (a prototype Chrome extension lives in `extension/`; see its README) with quorum-based promotion; see `docs/CONTRIBUTION_API.md`. In production set `BEEROO_SALT` and `BEEROO_ADMIN_TOKEN`, run `uvicorn --no-access-log`, and run `python scripts/promote_contributions.py` daily.
-
-## Ingesting captured data (BWS, Liquorland) and matching
-
-Liquorland/BWS data comes from manual browser captures (see `docs/CAPTURE_GUIDE.md`), loaded with:
-
-```bash
-python scripts/ingest.py bws --products a.json b.json --set-pickup pickup.json
-python scripts/ingest.py liquorland --products page1.json page2.json
-python scripts/ingest.py match     # re-run cross-retailer matching
-```
-
-Liquorland publishes no ABV in its list data and its `/api/*` is disallowed by robots.txt, so standard-drink values for Liquorland products appear only when the name states ABV or the same product is matched at a retailer that publishes it (`products.abv_source` records which). Otherwise status is `abv_unknown` and no figure is shown.
+Local server instead of static files: `BEEROO_DB=data/beeroo.sqlite3 uvicorn app.main:app --no-access-log`. API: `GET /api/states`, `/api/compare?state=NSW&sort=value&pack=case&q=...`, `/api/products/{id}?state=NSW`.
 
 ## Standard drinks
 
-`standard_drinks = volume_litres x ABV% x 0.789` (Australia: 10 g alcohol per standard drink).
+`standard_drinks = volume_litres x ABV% x 0.789` (Australia: 10 g alcohol per standard drink). Liquorland's list data has no ABV, so a value figure appears for its products only if the name states the ABV or the same product is matched at a retailer that publishes it (labelled "ABV from BWS"); otherwise it shows "ABV unknown". It's a value comparison, not encouragement to drink more.

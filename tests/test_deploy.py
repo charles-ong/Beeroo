@@ -53,7 +53,7 @@ def test_ingest_writes_prices_immediately_without_quorum(client, path):
     data = r.json()
     assert data["status"] == "ingested" and data["location_key"] == "bws:6723"
     assert data["products"] == 14 and data["new_observations"] > 40 and data["new_listings"] == 14
-    shown = client.get("/api/compare", params={"postcode": "2606"}).json()
+    shown = client.get("/api/compare", params={"state": "ACT"}).json()
     assert shown["meta"]["total"] == 14
     assert shown["locations"]["retailers"]["bws"]["store_name"] == "Woden"
 
@@ -90,13 +90,9 @@ def test_ingest_dan_murphys_and_liquorland(client):
 # ---- production guards ------------------------------------------------------
 
 
-def test_production_refuses_to_start_without_secrets(path, monkeypatch):
+def test_production_refuses_to_start_without_an_admin_token(path, monkeypatch):
     monkeypatch.setenv("BEEROO_ENV", "production")
-    monkeypatch.delenv("BEEROO_SALT", raising=False)
     monkeypatch.delenv("BEEROO_ADMIN_TOKEN", raising=False)
-    with pytest.raises(RuntimeError, match="BEEROO_SALT"):
-        create_app(path)
-    monkeypatch.setenv("BEEROO_SALT", "salty")
     with pytest.raises(RuntimeError, match="BEEROO_ADMIN_TOKEN"):
         create_app(path)
     monkeypatch.setenv("BEEROO_ADMIN_TOKEN", "short")
@@ -107,27 +103,15 @@ def test_production_refuses_to_start_without_secrets(path, monkeypatch):
 @pytest.fixture()
 def prod(path, monkeypatch):
     monkeypatch.setenv("BEEROO_ENV", "production")
-    monkeypatch.setenv("BEEROO_SALT", "salty")
     monkeypatch.setenv("BEEROO_ADMIN_TOKEN", TOKEN)
-    monkeypatch.delenv("BEEROO_CONTRIB_ENABLED", raising=False)
     return TestClient(create_app(path))
 
 
-def test_production_keeps_public_contributions_closed_by_default(prod):
-    body = {"schema_version": 1, "install_id": "00000000-0000-4000-8000-000000000001", "extension_version": "0.1.0",
-            "kind": "bws_products", "logged_in": False, "location": WODEN, "payload": load("bws_2606_products.json")}
-    assert prod.post("/api/contrib", json=body).status_code == 503
-
-
-def test_production_contributions_can_be_opened_explicitly(path, monkeypatch):
-    monkeypatch.setenv("BEEROO_ENV", "production")
-    monkeypatch.setenv("BEEROO_SALT", "salty")
-    monkeypatch.setenv("BEEROO_ADMIN_TOKEN", TOKEN)
-    monkeypatch.setenv("BEEROO_CONTRIB_ENABLED", "1")
-    c = TestClient(create_app(path))
-    body = {"schema_version": 1, "install_id": "00000000-0000-4000-8000-000000000001", "extension_version": "0.1.0",
-            "kind": "bws_products", "logged_in": False, "location": WODEN, "payload": load("bws_2606_products.json")}
-    assert c.post("/api/contrib", json=body).status_code == 202
+def test_the_public_contribution_endpoints_no_longer_exist(prod, client):
+    for c in (prod, client):
+        for path_ in ("/api/contrib", "/api/contrib/health", "/api/contrib/promote"):
+            assert c.post(path_, json={}).status_code in (404, 405), path_
+            assert c.get(path_).status_code in (404, 405), path_
 
 
 def test_production_hides_api_docs_but_admin_still_works(prod):

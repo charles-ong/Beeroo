@@ -18,34 +18,64 @@ from scrapers.dan_murphys import Blocked  # noqa: E402
 
 F = Path(__file__).parent / "fixtures"
 NOW = datetime(2026, 10, 1, 1, 0, tzinfo=timezone.utc)
-DM_PAGE = json.loads((F / "dan_murphys_browse_page1.json").read_text())
-BWS_PAYLOAD = bws_minimal = None  # set below (needs scrapers.bws)
 
 from scrapers import bws as bws_mod  # noqa: E402
+from scrapers import liquorland as ll_mod  # noqa: E402
 from scrapers.bws_live import RobotsDisallow  # noqa: E402
+from common.states import STATES  # noqa: E402
 
+DM_PAGE = json.loads((F / "dan_murphys_browse_page1.json").read_text())
 BWS_PAYLOAD = bws_mod.minimal_payload(json.loads((F / "bws_2606_products.json").read_text()))
+LL_PAYLOAD = ll_mod.minimal_payload(json.loads((F / "liquorland_act_products.json").read_text()))
 DM_STORE = Location(retailer=Retailer.DAN_MURPHYS, store_id="1546", store_name="Thornleigh",
                     suburb="Thornleigh", state="NSW", postcode="2120")
 BWS_STORE = Location(retailer=Retailer.BWS, store_id="6723", store_name="Woden",
                      suburb="Woden", state="ACT", postcode="2606")
-STORES = {"dan_murphys": DM_STORE, "bws": BWS_STORE}
-PAGES = {"dan_murphys": DM_PAGE, "bws": BWS_PAYLOAD}
+LL_STORE = ll_mod.location_for_site("ll_act")
+STORES = {"dan_murphys": DM_STORE, "bws": BWS_STORE, "liquorland": LL_STORE}
+PAGES = {"dan_murphys": DM_PAGE, "bws": BWS_PAYLOAD, "liquorland": LL_PAYLOAD}
+ALL = ("bws", "liquorland", "dan_murphys")
 
 
-def fake(name, total=24, collected=24, pages=1, errors=(), calls=None):
+class Clock:
+    """Fake monotonic clock: sessions take `session_s`, sleeping advances time."""
+
+    def __init__(self, session_s=300):
+        self.t, self.session_s, self.slept = 0.0, session_s, []
+
+    def monotonic(self):
+        return self.t
+
+    def sleep(self, seconds):
+        self.slept.append(seconds)
+        self.t += seconds
+
+
+def fake(name, total=24, collected=None, pages=1, errors=(), calls=None, clock=None, products=None):
     async def scrape(postcode, max_pages):
         if calls is not None:
             calls.append((name, postcode, max_pages))
-        return {"location": STORES[name], "raw_pages": [PAGES[name]] * pages,
-                "products": [object()] * collected, "errors": list(errors), "total": total}
+        if clock is not None:
+            clock.t += clock.session_s
+        n = products if products is not None else (total or 24)
+        result = {"location": STORES[name], "raw_pages": [PAGES[name]] * pages,
+                  "products": [object()] * n, "errors": list(errors), "total": total}
+        if collected is not None:
+            result["collected"] = collected
+        return result
     return scrape
 
 
-def blocked(name, calls):
+def blocked(name, calls, after=0):
+    """Raises Blocked on the (after+1)th call; fine before that."""
+    state = {"n": 0}
+
     async def scrape(postcode, max_pages):
         calls.append((name, postcode))
-        raise Blocked("bot protection page served (title='Attention Required! | Cloudflare')")
+        state["n"] += 1
+        if state["n"] > after:
+            raise Blocked("bot protection page served (title='Attention Required! | Cloudflare')")
+        return await fake(name)(postcode, max_pages)
     return scrape
 
 
@@ -61,173 +91,213 @@ def state(tmp_path):
     return str(tmp_path / "state.json")
 
 
-def go(state, scrapes, push=None, now=NOW, **kw):
+def go(state, scrapes, push=None, now=NOW, clock=None, **kw):
     pushed = []
     push = push or (lambda body: pushed.append(body) or {"products": 24, "new_observations": 58, "new_listings": 24})
-    kw.setdefault("gap", 0)
-    code, summary = ss.run(state_path=state, scrapes=scrapes, push=push, now=now, **kw)
+    clock = clock or Clock()
+    kw.setdefault("min_spacing", 0)
+    code, summary = ss.run(state_path=state, scrapes=scrapes, push=push, now=now,
+                           sleep=clock.sleep, monotonic=clock.monotonic, **kw)
     return code, summary["results"], pushed
 
 
-def by(results, name):
-    return next(r for r in results if r["retailer"] == name)
+def by(results, name, zone=None):
+    return [r for r in results if r["retailer"] == name and (zone is None or r.get("zone") == zone)]
 
 
-# ---- the four cities --------------------------------------------------------
+# ---- states, not postcodes --------------------------------------------------
 
 
-def test_the_cities_are_sydney_canberra_melbourne_perth_only():
-    assert ss.CITIES == {"2000": "Sydney NSW", "2600": "Canberra ACT", "3000": "Melbourne VIC", "6000": "Perth WA"}
-    assert ss.ZONES == ["2000", "2600", "3000", "6000"]
+def test_every_state_and_territory_is_a_zone_with_its_pricing_postcode():
+    assert ss.ZONES == list(STATES) == ["NSW", "ACT", "VIC", "QLD", "SA", "WA", "TAS", "NT"]
+    assert STATES["NSW"]["postcode"] == "2100"                      # as specified
+    assert all(len(v["postcode"]) == 4 for v in STATES.values())
 
 
-def test_liquorland_is_never_automated():
-    assert "liquorland" not in ss.RETAILERS and "liquorland" not in ss.KINDS
-    with pytest.raises(SystemExit):
-        ss.main(["--retailer", "liquorland"])
+def test_all_three_retailers_are_scheduled_in_a_fixed_order():
+    assert ss.RETAILERS == ALL
+    assert set(ss.KINDS) == set(ALL) and ss.KINDS["liquorland"] == "liquorland_products"
 
 
 def test_zone_rotation_starts_in_order_then_least_recent():
     r = ss._blank()
-    assert ss.pick_zone(r) == "2000"
-    r["zones"]["2000"] = {"last_success": "2026-10-01"}
-    assert ss.pick_zone(r) == "2600"
-    assert ss.pick_zones(r, n=3) == ["2600", "3000", "6000"]
+    assert ss.pick_zone(r) == "NSW"
+    r["zones"]["NSW"] = {"last_success": "2026-10-01"}
+    assert ss.pick_zone(r) == "ACT"
+    assert ss.pick_zones(r, n=3) == ["ACT", "VIC", "QLD"]
     r["zones"] = {z: {"last_success": f"2026-09-{10 + i}"} for i, z in enumerate(ss.ZONES)}
-    assert ss.pick_zone(r) == "2000"                  # oldest success first
+    assert ss.pick_zone(r) == "NSW"                  # oldest success first
 
 
 def test_failed_attempts_do_not_count_as_fresh():
     r = ss._blank()
-    r["zones"]["2000"] = {"last_attempt": "2026-10-01", "last_error": "x"}
-    assert ss.pick_zone(r) == "2000"
+    r["zones"]["NSW"] = {"last_attempt": "2026-10-01", "last_error": "x"}
+    assert ss.pick_zone(r) == "NSW"
 
 
 def test_old_single_retailer_state_is_migrated(state):
     Path(state).write_text(json.dumps({"zones": {"2000": {"last_success": "2026-09-01"}},
                                        "blocked": {"consecutive": 2, "backoff_until": None}}))
     st = ss.load_state(state)
-    assert st["retailers"]["dan_murphys"]["zones"]["2000"]["last_success"] == "2026-09-01"
     assert st["retailers"]["dan_murphys"]["blocked"]["consecutive"] == 2
     assert "bws" not in st["retailers"]
 
 
 def test_corrupt_state_file_is_treated_as_empty(state):
     Path(state).write_text("{not json")
-    code, results, _ = go(state, {"bws": fake("bws")})
+    code, results, _ = go(state, {"bws": fake("bws")}, zones_per_run=1)
     assert code == 0 and results[0]["status"] == "ok"
 
 
-# ---- running ----------------------------------------------------------------
+# ---- a full daily run -------------------------------------------------------
 
 
-def test_each_retailer_runs_one_city_by_default_and_rotates_independently(state):
+def test_a_default_run_visits_every_state_at_every_retailer_interleaved(state):
     calls = []
-    scrapes = {"dan_murphys": fake("dan_murphys", calls=calls), "bws": fake("bws", calls=calls)}
+    scrapes = {n: fake(n, calls=calls) for n in ALL}
     code, results, pushed = go(state, scrapes)
-    assert code == 0 and [c[0] for c in calls] == ["bws", "dan_murphys"]      # BWS first
-    assert [c[1] for c in calls] == ["2000", "2000"] and len(pushed) == 2
+    assert code == 0 and len(calls) == 24 and len(pushed) == 24 and {r["status"] for r in results} == {"ok"}
+    # NSW (2100) at all three sites first, then ACT (2600), and so on: no site is hit back to back
+    assert [c[0] for c in calls[:6]] == ["bws", "liquorland", "dan_murphys"] * 2
+    assert [c[1] for c in calls[:6]] == ["2100"] * 3 + ["2600"] * 3
+    for name in ALL:
+        assert [c[1] for c in calls if c[0] == name] == [STATES[z]["postcode"] for z in ss.ZONES]
+
+
+def test_postcodes_passed_to_the_scrapers_come_from_the_states_table(state):
+    calls = []
+    go(state, {"bws": fake("bws", calls=calls)}, zone="WA")
+    assert calls == [("bws", "6000", 60)]
+
+
+def test_zones_per_run_limits_how_many_states_each_retailer_visits(state):
+    calls = []
+    go(state, {n: fake(n, calls=calls) for n in ALL}, zones_per_run=2)
+    assert len(calls) == 6
+    assert {c[1] for c in calls} == {"2100", "2600"}
+
+
+def test_next_run_continues_with_the_least_recently_updated_states(state):
+    calls = []
+    scrapes = {"bws": fake("bws", calls=calls)}
+    go(state, scrapes, zones_per_run=3)
     calls.clear()
-    go(state, scrapes, now=NOW + timedelta(days=1))
-    assert [c[1] for c in calls] == ["2600", "2600"]
+    go(state, scrapes, zones_per_run=3, now=NOW + timedelta(days=1))
+    assert [c[1] for c in calls] == [STATES[z]["postcode"] for z in ("QLD", "SA", "WA")]
 
 
 def test_push_bodies_carry_kind_location_and_capture_time(state):
-    _, _, pushed = go(state, {"bws": fake("bws"), "dan_murphys": fake("dan_murphys")})
+    _, _, pushed = go(state, {n: fake(n) for n in ALL}, zones_per_run=1)
     kinds = {b["kind"]: b for b in pushed}
-    assert set(kinds) == {"bws_products", "dan_murphys_browse"}
-    b = kinds["bws_products"]
-    assert b["payload"] == BWS_PAYLOAD and b["observed_at"] == NOW.isoformat()
-    assert b["location"] == {"store_id": "6723", "store_name": "Woden", "suburb": "Woden", "state": "ACT", "postcode": "2606"}
+    assert set(kinds) == {"bws_products", "liquorland_products", "dan_murphys_browse"}
+    assert kinds["bws_products"]["payload"] == BWS_PAYLOAD and kinds["bws_products"]["observed_at"] == NOW.isoformat()
+    assert kinds["bws_products"]["location"]["store_id"] == "6723"
+    assert kinds["liquorland_products"]["location"] is None            # state-level; derived from the payload
+    assert kinds["dan_murphys_browse"]["location"]["state"] == "NSW"
 
 
-def test_all_four_cities_in_one_run_with_gaps_between_them(state):
-    calls, slept = [], []
-    code, results, _ = go(state, {"bws": fake("bws", calls=calls)}, zones_per_run=4, gap=240,
-                          sleep=slept.append)
-    assert [c[1] for c in calls] == ["2000", "2600", "3000", "6000"]
-    assert len(slept) == 3 and all(180 <= s <= 300 for s in slept)               # +-25% around the gap
-    st = ss.load_state(state)["retailers"]["bws"]["zones"]
-    assert set(st) == set(ss.ZONES) and all(z["last_success"] for z in st.values())
+def test_retailer_filter_forced_state_and_jitter_once(state):
+    clock, calls = Clock(), []
+    go(state, {n: fake(n, calls=calls) for n in ALL}, retailers=["dan_murphys"], zone="NT", max_pages=3,
+       jitter=600, clock=clock)
+    assert calls == [("dan_murphys", "0800", 3)] and len(clock.slept) == 1 and 0 <= clock.slept[0] <= 600
 
 
-def test_retailer_filter_forced_zone_and_jitter(state):
-    slept, calls = [], []
-    go(state, {"bws": fake("bws", calls=calls), "dan_murphys": fake("dan_murphys", calls=calls)},
-       retailers=["dan_murphys"], zone="6000", max_pages=3, jitter=600, sleep=slept.append)
-    assert calls == [("dan_murphys", "6000", 3)] and len(slept) == 1 and 0 <= slept[0] <= 600
+# ---- politeness: spacing between sessions on the same site -----------------------
+
+
+def test_a_single_site_is_slowed_down_between_states(state):
+    clock = Clock(session_s=60)
+    go(state, {"bws": fake("bws", clock=clock)}, zones_per_run=4, min_spacing=240, clock=clock)
+    assert len(clock.slept) == 3 and all(180 <= s <= 300 for s in clock.slept)   # ~240 s +-25% between sessions on one site
+
+
+def test_interleaving_already_spaces_sites_so_no_extra_waiting(state):
+    clock = Clock(session_s=400)                       # three 400 s sessions between visits to the same site
+    go(state, {n: fake(n, clock=clock) for n in ALL}, zones_per_run=3, min_spacing=240, clock=clock)
+    assert clock.slept == []
 
 
 # ---- completeness -----------------------------------------------------------
 
 
 def test_out_of_stock_items_count_as_accounted_for(state):
-    # BWS Woden: site lists 745, store stocks ~204; the rest are benign "no available online prices"
     benign = [(i, "no available online prices") for i in range(541)]
-    _, results, _ = go(state, {"bws": fake("bws", total=745, collected=204, errors=benign)})
+    _, results, _ = go(state, {"bws": fake("bws", total=745, products=204, errors=benign)}, zone="ACT")
     assert results[0]["status"] == "ok"
-    assert "last_success" in ss.load_state(state)["retailers"]["bws"]["zones"]["2000"]
+    assert "last_success" in ss.load_state(state)["retailers"]["bws"]["zones"]["ACT"]
+
+
+def test_liquorland_counts_list_entries_not_merged_products(state):
+    # 987 entries merge into 392 products; "collected" is in the site's unit
+    _, results, _ = go(state, {"liquorland": fake("liquorland", total=987, products=392, collected=987)}, zone="NSW")
+    assert results[0]["status"] == "ok" and results[0]["collected"] == 987
+    _, partial, _ = go(state, {"liquorland": fake("liquorland", total=987, products=392, collected=500)}, zone="VIC")
+    assert partial[0]["status"] == "partial"
 
 
 def test_unexplained_shortfall_is_partial_and_not_fresh(state):
     real_errors = [(i, "KeyError: 'Price'") for i in range(10)]
-    code, results, pushed = go(state, {"dan_murphys": fake("dan_murphys", total=400, collected=120, errors=real_errors)})
+    code, results, pushed = go(state, {"dan_murphys": fake("dan_murphys", total=400, products=120, errors=real_errors)}, zone="NSW")
     assert code == 0 and results[0]["status"] == "partial" and pushed
-    assert "last_success" not in ss.load_state(state)["retailers"]["dan_murphys"]["zones"]["2000"]
+    assert "last_success" not in ss.load_state(state)["retailers"]["dan_murphys"]["zones"]["NSW"]
 
 
 def test_unknown_total_counts_as_incomplete(state):
-    _, results, _ = go(state, {"bws": fake("bws", total=None)})
+    _, results, _ = go(state, {"bws": fake("bws", total=None)}, zone="NSW")
     assert results[0]["status"] == "partial"
 
 
 # ---- blocking and backoff ---------------------------------------------------
 
 
-def test_a_block_stops_only_that_retailer_and_backs_off_exponentially(state):
+def test_a_block_stops_only_that_retailer_for_the_rest_of_the_run(state):
     calls = []
-    scrapes = {"bws": fake("bws", calls=calls), "dan_murphys": blocked("dan_murphys", calls)}
+    scrapes = {"bws": fake("bws", calls=calls), "liquorland": fake("liquorland", calls=calls),
+               "dan_murphys": blocked("dan_murphys", calls)}
     code, results, pushed = go(state, scrapes)
     assert code == 3
-    assert by(results, "dan_murphys")["status"] == "blocked" and by(results, "dan_murphys")["backoff_days"] == 2
-    assert by(results, "bws")["status"] == "ok" and len(pushed) == 1            # BWS unaffected
+    dm = by(results, "dan_murphys")
+    assert len(dm) == 1 and dm[0]["status"] == "blocked" and dm[0]["backoff_days"] == 2      # asked once, then left alone
+    assert len(by(results, "bws")) == 8 and len(by(results, "liquorland")) == 8              # others did every state
+    assert len(pushed) == 16
     st = ss.load_state(state)["retailers"]
     assert datetime.fromisoformat(st["dan_murphys"]["blocked"]["backoff_until"]) == NOW + timedelta(days=2)
     assert st["bws"]["blocked"]["backoff_until"] is None
 
-    # inside the window the blocked retailer is never launched; BWS still runs
-    calls.clear()
-    code, results, _ = go(state, scrapes, now=NOW + timedelta(days=1))
-    assert [c[0] for c in calls] == ["bws"] and by(results, "dan_murphys")["status"] == "backing_off"
 
-    # window over: tries again, blocked again -> 4 days
-    calls.clear()
-    code, results, _ = go(state, scrapes, now=NOW + timedelta(days=3))
-    assert code == 3 and by(results, "dan_murphys")["backoff_days"] == 4
-
-
-def test_a_block_ends_that_retailers_remaining_cities_for_the_day(state):
+def test_a_block_part_way_through_keeps_what_was_collected(state):
     calls = []
-    go(state, {"dan_murphys": blocked("dan_murphys", calls)}, zones_per_run=4)
-    assert len(calls) == 1
+    code, results, pushed = go(state, {"liquorland": blocked("liquorland", calls, after=2)})
+    statuses = [r["status"] for r in results]
+    assert statuses == ["ok", "ok", "blocked"] and code == 3 and len(pushed) == 2
+    assert len(calls) == 3                                                  # never retried
 
 
-def test_backoff_is_capped(state):
+def test_blocked_site_is_skipped_inside_its_backoff_window_then_retried(state):
+    calls = []
+    scrapes = {"bws": fake("bws", calls=calls), "dan_murphys": blocked("dan_murphys", calls)}
+    go(state, scrapes, zones_per_run=1)
+    calls.clear()
+    code, results, _ = go(state, scrapes, zones_per_run=1, now=NOW + timedelta(days=1))
+    assert [c[0] for c in calls] == ["bws"] and by(results, "dan_murphys")[0]["status"] == "backing_off"
+    calls.clear()
+    code, results, _ = go(state, scrapes, zones_per_run=1, now=NOW + timedelta(days=3))
+    assert code == 3 and by(results, "dan_murphys")[0]["backoff_days"] == 4
+
+
+def test_backoff_is_capped_and_success_resets_it(state):
     ss.save_state(state, {"retailers": {"dan_murphys": {"zones": {}, "blocked": {"consecutive": 9, "backoff_until": None}}}})
-    _, results, _ = go(state, {"dan_murphys": blocked("dan_murphys", [])})
+    _, results, _ = go(state, {"dan_murphys": blocked("dan_murphys", [])}, zones_per_run=1)
     assert results[0]["backoff_days"] == ss.MAX_BACKOFF_DAYS
-
-
-def test_success_after_backoff_resets_the_counter(state):
-    go(state, {"dan_murphys": blocked("dan_murphys", [])})
-    go(state, {"dan_murphys": fake("dan_murphys")}, now=NOW + timedelta(days=3))
+    go(state, {"dan_murphys": fake("dan_murphys")}, zones_per_run=1, now=NOW + timedelta(days=20))
     assert ss.load_state(state)["retailers"]["dan_murphys"]["blocked"] == {"consecutive": 0, "backoff_until": None}
 
 
 def test_robots_disallow_skips_the_retailer_for_a_week_without_counting_as_a_block(state):
     calls = []
     code, results, pushed = go(state, {"bws": robots("bws", calls)})
-    assert code == 1 and results[0]["status"] == "robots_disallow" and pushed == []
+    assert code == 1 and results[0]["status"] == "robots_disallow" and pushed == [] and len(calls) == 1
     st = ss.load_state(state)["retailers"]["bws"]["blocked"]
     assert datetime.fromisoformat(st["backoff_until"]) == NOW + timedelta(days=7) and st["consecutive"] == 0
     assert go(state, {"bws": robots("bws", calls)}, now=NOW + timedelta(days=2))[1][0]["status"] == "backing_off"
@@ -239,24 +309,59 @@ def test_robots_disallow_skips_the_retailer_for_a_week_without_counting_as_a_blo
 def test_scrape_error_is_recorded_without_backoff_and_other_retailers_still_run(state):
     async def boom(postcode, max_pages):
         raise RuntimeError("could not determine the active store")
-    code, results, pushed = go(state, {"bws": boom, "dan_murphys": fake("dan_murphys")})
-    assert code == 1 and by(results, "bws")["status"] == "error" and by(results, "dan_murphys")["status"] == "ok"
+    code, results, pushed = go(state, {"bws": boom, "dan_murphys": fake("dan_murphys")}, zones_per_run=2)
+    assert code == 1 and len(by(results, "bws")) == 1 and by(results, "bws")[0]["status"] == "error"
+    assert [r["status"] for r in by(results, "dan_murphys")] == ["ok", "ok"]
     st = ss.load_state(state)["retailers"]["bws"]
-    assert "active store" in st["zones"]["2000"]["last_error"] and st["blocked"]["backoff_until"] is None
+    assert "active store" in st["zones"]["NSW"]["last_error"] and st["blocked"]["backoff_until"] is None
 
 
 def test_push_failure_is_an_error_and_not_a_success(state):
     def bad(body):
         raise RuntimeError("could not reach server")
-    code, results, _ = go(state, {"bws": fake("bws")}, push=bad)
+    code, results, _ = go(state, {"bws": fake("bws")}, push=bad, zone="NSW")
     assert code == 1 and results[0]["status"] == "push_failed"
-    assert "last_success" not in ss.load_state(state)["retailers"]["bws"]["zones"]["2000"]
+    assert "last_success" not in ss.load_state(state)["retailers"]["bws"]["zones"]["NSW"]
+
+
+# ---- the Liquorland switch ----------------------------------------------------
+
+
+def test_skip_list_is_read_from_the_environment():
+    assert ss.skipped_retailers({"BEEROO_SKIP_RETAILERS": "liquorland, bws"}) == {"liquorland", "bws"}
+    assert ss.skipped_retailers({}) == set() and ss.skipped_retailers({"BEEROO_SKIP_RETAILERS": " ,"}) == set()
+
+
+def test_cli_skips_the_retailers_named_in_the_environment(tmp_path, monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(ss, "DEFAULT_LOG", tmp_path / "scrape.log")
+    monkeypatch.setattr(ss, "real_scrapes", lambda browser_path=None: {n: fake(n, calls=calls) for n in ALL})
+    monkeypatch.setenv("BEEROO_SKIP_RETAILERS", "liquorland")
+    code = ss.main(["--db", str(tmp_path / "x.sqlite3"), "--state", str(tmp_path / "s.json"),
+                    "--zones-per-run", "1", "--min-spacing", "0"])
+    assert code == 0 and {c[0] for c in calls} == {"bws", "dan_murphys"}
+
+
+def test_cli_includes_liquorland_by_default_and_all_states(tmp_path, monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(ss, "DEFAULT_LOG", tmp_path / "scrape.log")
+    monkeypatch.setattr(ss, "real_scrapes", lambda browser_path=None: {n: fake(n, calls=calls) for n in ALL})
+    monkeypatch.delenv("BEEROO_SKIP_RETAILERS", raising=False)
+    code = ss.main(["--db", str(tmp_path / "x.sqlite3"), "--state", str(tmp_path / "s.json"), "--min-spacing", "0"])
+    assert code == 0 and len(calls) == 24 and {c[0] for c in calls} == set(ALL)
+
+
+def test_cli_rejects_unknown_retailers_and_states():
+    with pytest.raises(SystemExit):
+        ss.main(["--retailer", "woolworths"])
+    with pytest.raises(SystemExit):
+        ss.main(["--zone", "2606"])
 
 
 # ---- end to end -------------------------------------------------------------
 
 
-def test_end_to_end_into_the_real_app_for_both_retailers(state, tmp_path, monkeypatch):
+def test_end_to_end_into_the_real_app_for_all_three_retailers(state, tmp_path, monkeypatch):
     monkeypatch.setenv("BEEROO_ADMIN_TOKEN", "t" * 32)
     client = TestClient(create_app(str(tmp_path / "srv.sqlite3")))
 
@@ -265,12 +370,15 @@ def test_end_to_end_into_the_real_app_for_both_retailers(state, tmp_path, monkey
         assert r.status_code == 200, r.text
         return r.json()
 
-    code, results, _ = go(state, {"bws": fake("bws", total=16, collected=14), "dan_murphys": fake("dan_murphys")}, push=push)
+    scrapes = {"bws": fake("bws", total=16, products=14), "liquorland": fake("liquorland", total=60, products=40, collected=60),
+               "dan_murphys": fake("dan_murphys")}
+    code, results, _ = go(state, scrapes, push=push, zones_per_run=1)
     assert code == 0 and {r["status"] for r in results} == {"ok"}
-    act = client.get("/api/compare", params={"postcode": "2606"}).json()
+    act = client.get("/api/compare", params={"state": "ACT"}).json()
     assert act["locations"]["retailers"]["bws"]["store_name"] == "Woden"
+    assert act["locations"]["retailers"]["liquorland"]["location_key"] == "liquorland:ll_act"
     assert act["meta"]["total"] >= 14
-    nsw = client.get("/api/compare", params={"postcode": "2120"}).json()
+    nsw = client.get("/api/compare", params={"state": "NSW"}).json()
     assert nsw["locations"]["retailers"]["dan_murphys"]["store_name"] == "Thornleigh"
 
 
@@ -280,17 +388,6 @@ def test_local_push_writes_to_a_database(tmp_path):
                              "payload": DM_PAGE, "observed_at": NOW.isoformat()})
     assert r["products"] == 24
     assert db.connect(str(path)).execute("SELECT COUNT(*) c FROM listings").fetchone()["c"] == 24
-
-
-def test_cli_wiring_with_fake_browsers(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(ss, "DEFAULT_LOG", tmp_path / "scrape.log")
-    monkeypatch.setattr(ss, "real_scrapes", lambda browser_path=None: {"bws": fake("bws"), "dan_murphys": fake("dan_murphys")})
-    code = ss.main(["--db", str(tmp_path / "cli.sqlite3"), "--state", str(tmp_path / "cli_state.json"),
-                    "--zones-per-run", "2", "--gap", "0", "--retailer", "bws"])
-    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert code == 0 and [r["zone"] for r in out["results"]] == ["2000", "2600"]
-    assert {r["retailer"] for r in out["results"]} == {"bws"}
-    assert db.connect(str(tmp_path / "cli.sqlite3")).execute("SELECT COUNT(*) c FROM listings").fetchone()["c"] == 14
 
 
 # ---- http_push --------------------------------------------------------------

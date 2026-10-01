@@ -23,14 +23,9 @@ Ground rules: no CAPTCHA solving, no stealth/proxy/fingerprint evasion, low requ
 - Full pagination to ~404 products via "Load more".
 - Whether prices differ between stores/states (the key assumption behind postcode support).
 
-## BWS / Liquorland status
-- No fixtures yet. `scrapers/endeavour.py` is a shared, retailer-parameterised parser for the Dan Murphy's "Browse" format; BWS (also Endeavour) *may* use the same format - **unverified**.
-- Liquorland (Coles Group) has an unknown format (robots.txt hints at Fredhopper `fh_` parameters). No parser written until we have real data.
-- Plan: capture via `docs/CAPTURE_GUIDE.md` + `scripts/har_to_fixtures.py`.
+## BWS and Liquorland findings (from manual browser captures, 2026-10-01; superseded by the live scrapers below)
 
-## BWS and Liquorland findings (from manual captures, 2026-10-01)
-
-Captured in a normal browser, logged out, locations 2606 (ACT) and 6000 (WA). Raw captures and HARs are gitignored (they contain cookies/tokens; one capture held a live anonymous bearer token, deleted). Curated, trimmed fixtures live in `tests/fixtures/`.
+Captured earlier in a normal browser, logged out, for locations 2606 (ACT) and 6000 (WA). Curated, trimmed copies are the test fixtures in `tests/fixtures/`. (Raw HAR files contain cookies/tokens and must not be committed or shared; `*.har` is gitignored.)
 
 **Prices differ by location at both retailers** (the core premise of postcode support is confirmed):
 - BWS: 107 of 207 products common to Woden (ACT, store 6723) and Perth (WA, store 4261) had different prices; the catalogue/availability also differs.
@@ -40,8 +35,8 @@ Captured in a normal browser, logged out, locations 2606 (ACT) and 6000 (WA). Ra
 
 **Liquorland** (`scrapers/liquorland.py`): `/api/products/<site>/beer-and-cider` (60/page, ~816-890 products incl. cider), one entry per pack variant (`<sku>_ea`, `PACK6`, `CTN24`...). Pricing is **per state** (`ll_act`, `ll_wa`), keyed `liquorland:ll_<state>`. The list has **no ABV** (only ~6% of names state it); ABV needs the per-product detail endpoint (`alcoholPercent`).
 
-### Blocking issue: Liquorland robots.txt
-Liquorland's `robots.txt` has `Disallow: /api/*` and its category HTML is client-rendered (no product data), so the data can only be fetched from disallowed URLs, and ABV would need one extra disallowed request per product. Combined with the ShieldSquare CAPTCHA, **an automated Liquorland scraper would break our own ground rules.** The parsers are written for manually captured data only. Options: manual/periodic captures, ask Coles Group for a feed, or exclude Liquorland ABV/standard-drink from the MVP (compute from names where present).
+### Liquorland robots.txt
+Liquorland's `robots.txt` has `Disallow: /api/*` and its category HTML is client-rendered (no product data), so the data can only come from those disallowed URLs. Its ABV is only available per product from yet another disallowed request. The scheduled scraper includes Liquorland **at the operator's request**, never solves a CAPTCHA, and can be switched off (`BEEROO_SKIP_RETAILERS=liquorland`).
 
 ## BWS live findings (2026-10-01, from a visible-browser run, Canberra 2600)
 
@@ -55,3 +50,16 @@ Liquorland's `robots.txt` has `Disallow: /api/*` and its category HTML is client
   - A `webpacktype: Case` with quantity 1 and no count: count = `liquorsize` / per-can volume only if a clean whole number, else skipped.
   - Multi-buy tags ("2 for $120") are sometimes stamped onto the single can as well as the carton; kept only if cheaper than buying separately.
 - Result on the real capture: 204 in-stock products, ABV on 203, $/standard drink range $1.10-$10.97 for beers over 2% ABV.
+
+
+## Liquorland live findings (2026-10-01, visible-browser run, NSW 2100)
+
+- Loaded normally (HTTP 200); **no CAPTCHA** appeared for a visible Playwright Chromium. (An earlier plain terms-page load from another browser did get a ShieldSquare CAPTCHA, so this can change; the scraper stops if it ever sees one.)
+- `https://www.liquorland.com.au/beer-and-cider/beer` -> `GET /api/products/ll/<state>/beer-and-cider?page=N&show=60&v=2&facets=beer` (note `ll/<state>`, e.g. `ll/nsw`; the payload's own `debugQuery` says `sitestate=ll_nsw`). 987 entries for NSW (816 for ACT): each pack variant (`<sku>_ea`, `PACK6`, `CTN24`) is its own entry; merged by SKU that is ~392 products.
+- Location: a modal "See what's available near you" (`input[aria-label^="Enter a suburb or postcode"]`) -> suggestion button `search-results-item` -> "Save location" -> a "Set shopping method" drawer listing stores nearest first (`div.StoreItem`) -> "Save & continue shopping". Only then does the site switch to the state's catalogue.
+- Pagination: a pager with 20/40/60/80 results per page and a real `Go to next page (N)` link. (The "Show more" button on the page is a sidebar filter expander, not pagination.)
+- Prices are per **state**, not store; `unit prices` $1.25-$13.50 on the real NSW capture, volumes consistent. The list has **no ABV** (3 of 392 products stated it in the name).
+
+## Dan Murphy's live findings
+
+Headless Chromium is blocked (HTTP 403, Cloudflare). A visible browser worked at first (see above for the Browse API and store picker), then got blocked after ~9 page loads from one IP, and was still blocked hours later. It remains blocked from the development machine.

@@ -1,7 +1,7 @@
 """Export the database as a FREE static website (no server needed).
 
     python scripts/export_static.py --db data/beeroo.sqlite3 --out site \\
-        [--states NSW ACT VIC WA]
+        [--states NSW ACT ...]      # default: every state and territory
 
 Writes site/index.html + static assets + data files:
   data/manifest.json                    which states are covered, when generated
@@ -23,13 +23,10 @@ sys.path.insert(0, str(ROOT))
 
 from app import queries  # noqa: E402
 from common import db  # noqa: E402
+from common.states import STATES, state_list  # noqa: E402
 
-REPRESENTATIVE_POSTCODE = {
-    "NSW": "2000", "ACT": "2600", "VIC": "3000", "QLD": "4000",
-    "SA": "5000", "WA": "6000", "TAS": "7000", "NT": "0800",
-}
 PACKS = [None, "single", "pack", "case"]
-DEFAULT_STATES = ["NSW", "ACT", "VIC", "WA"]
+DEFAULT_STATES = list(STATES)
 
 
 def _write(path, data):
@@ -50,11 +47,12 @@ def export(conn, out_dir, states=DEFAULT_STATES, now=None):
 
     covered = []
     for state in states:
-        postcode = REPRESENTATIVE_POSTCODE[state]
-        locations = queries.resolve_locations(conn, postcode)
+        locations = queries.resolve_locations(conn, state)
         latest = [l["latest"] for l in locations["retailers"].values() if l]
+        # Only states with data of their own are exported; the dropdown marks the
+        # others "(no prices yet)". There is no cross-state fallback.
         if not latest:
-            continue  # nothing loaded at all
+            continue
         covered.append(state)
         meta = {"demo": demo, "latest_data": max(latest), "state": state,
                 "generated_at": now.isoformat()}
@@ -67,13 +65,13 @@ def export(conn, out_dir, states=DEFAULT_STATES, now=None):
 
         ids = {p["id"] for p in queries.load_products(conn, locations, True, None, now)}
         for pid in sorted(ids):
-            detail = queries.product_detail(conn, pid, postcode, now)
+            detail = queries.product_detail(conn, pid, state, now)
             if detail:
                 write(out / "data" / state / "p" / f"{pid}.json", detail)
 
     write(out / "data" / "manifest.json", {
         "generated_at": now.isoformat(), "states": covered, "demo": demo,
-        "all_states": states,
+        "all_states": [s for s in state_list() if s["code"] in states],
     })
     return {"states": covered, **written}
 
@@ -98,7 +96,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", default="data/beeroo.sqlite3")
     ap.add_argument("--out", default="site")
-    ap.add_argument("--states", nargs="+", default=DEFAULT_STATES, choices=sorted(REPRESENTATIVE_POSTCODE))
+    ap.add_argument("--states", nargs="+", default=DEFAULT_STATES, choices=sorted(STATES))
     args = ap.parse_args()
 
     if not Path(args.db).exists():

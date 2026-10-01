@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir -r requirements-web.txt
 COPY app app
 COPY common common
 COPY scrapers scrapers
-COPY scripts/promote_contributions.py scripts/backup_db.py scripts/
+COPY scripts/backup_db.py scripts/
 
 USER beeroo
 EXPOSE 8080

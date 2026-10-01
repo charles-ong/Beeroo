@@ -16,3 +16,4 @@ data/*.log
 data/.scrape.lock
 data/scrape_state.json
 data/backups/
+site/

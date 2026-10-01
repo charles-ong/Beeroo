@@ -1,55 +1,56 @@
-# Scheduled scraping (BWS + Dan Murphy's, four cities)
+# Scheduled scraping (BWS, Liquorland, Dan Murphy's; every state and territory)
 
-Daily, on **your own Mac**, in a **visible browser window**, for Sydney (2000), Canberra (2600), Melbourne (3000) and Perth (6000). Liquorland is not automated (see `docs/LIQUORLAND_MANUAL.md`). This is part of the free setup in `docs/FREE_HOSTING.md`.
+Daily, on **your own computer**, in a **visible browser window**. Each state/territory is priced from the store nearest its pricing postcode (`common/states.py`, e.g. NSW 2100). This is part of the free setup in `docs/FREE_HOSTING.md`.
 
 ## Status (2026-10-01)
 
 | Retailer | Live status |
 |---|---|
-| **BWS** | **Verified end to end** (Canberra 2600): robots.txt allows category pages; store picker works; all 745 beers loaded via "Load more" in ~3.5 min; 217 in-stock products and 617 prices stored. Not blocked. Other cities should behave the same but haven't been run. |
-| **Dan Murphy's** | Scraper built and tested with fakes, **blocked** by Cloudflare on this IP (first request, ~2.5 h after an earlier block). Its store-selection steps have never run live. Backoff logic worked on the real block. |
+| **BWS** | **Verified live** for ACT (2600) and NSW (2100): robots.txt allows category pages; store picker works; all 745 beers load via "Load more"; ~190-220 in-stock products per store. Not blocked. |
+| **Liquorland** | **Verified live** for NSW (2100): no CAPTCHA appeared; location modal + nearest-store selection work; 13 pages at 80 per page gave all 987 entries (392 products). **Caveat:** its `robots.txt` disallows `/api/*`, the path its pages load this data from. It is included because you asked for all sites. Switch it off with `BEEROO_SKIP_RETAILERS=liquorland`. |
+| **Dan Murphy's** | Built and tested with fakes, but **blocked** by Cloudflare from the development machine (even a single page load, hours after earlier blocks). Its store-selection steps have never run live. The daily run still tries it once per state and backs off. |
 
-Retailer terms of use are still **unreviewed**; automated access may breach them.
+The other states have not been run live. Retailer terms of use are **unreviewed**; automated access may breach them.
 
-## What one run does
+## What one daily run does
 
-For each retailer (BWS first), pick the least-recently-updated city (or `--zones-per-run N` cities, 4 minutes apart on average):
+For every state/territory, for each retailer, **interleaved** (BWS NSW, Liquorland NSW, Dan Murphy's NSW, BWS ACT, ...) so no site sees back-to-back sessions (a minimum average gap of 3 minutes per site is enforced on top):
 
-1. BWS: load `robots.txt` in the same visible browser and **stop if the target path is disallowed**.
-2. Open the beer page, pick the nearest store through the site's own store modal.
-3. Click "Load more" like a user (2-4 s between clicks) until the list ends.
-4. Read the product data the page loads (no extra requests); keep only in-stock items and the fields we need (12 MB becomes 0.3 MB); store it locally or push it.
+1. Open the beer page, set the state's pricing postcode through the site's own location picker, and choose the **nearest** store.
+2. Page through the list like a user ("Load more" at BWS; 80 per page then "next page" at Liquorland).
+3. Read only the product data the page loads (no extra requests); keep in-stock items and the fields we need; store it locally or push it.
 
-BWS lists ~745 beers but a single store only stocks about 200-300; the rest are counted as "accounted for", not as missing.
+A full run (3 sites x 8 states) takes roughly 1.5-2 hours with windows opening and closing, which is why the default schedule is 03:00.
 
 ## Safety behaviour (tested)
 
-- A block page: that retailer stops at once, never retries that day, backs off 2, 4, 8, up to 14 days. Each retailer backs off independently, so a Dan Murphy's block doesn't stop BWS.
-- robots.txt disallows the page: skip that retailer for 7 days.
+- **Bot protection or a CAPTCHA** (Cloudflare "Attention Required", HTTP 403/429, Liquorland's ShieldSquare/perfdrive page): that retailer stops for the rest of the run, backs off 2, 4, 8, up to 14 days, and is never retried the same day. **We never try to solve a CAPTCHA or get past a block.** Retailers back off independently.
+- **robots.txt** is read for BWS and Liquorland pages in the same browser; a disallowed *page* path means skipping that retailer for 7 days.
 - Backoff is checked **before** a browser is launched. Another run in progress: exits.
-- A result missing more than 20% (after counting out-of-stock) is saved but not marked fresh.
-- No proxies, stealth plugins, CAPTCHA solving or IP rotation, ever. If a site blocks us we stop.
+- A result missing more than 20% of the site's total (after counting out-of-stock items) is saved but not marked fresh.
+- No proxies, stealth plugins, CAPTCHA solving or IP rotation. A test fails if such code is added.
 
 ## Run it
 
 ```bash
-.venv/bin/python scripts/scheduled_scrape.py --retailer bws --zone 2600     # try one city by hand
-.venv/bin/python scripts/scheduled_scrape.py                                 # both retailers, 1 city each
-.venv/bin/python scripts/scheduled_scrape.py --zones-per-run 4 --retailer bws
+.venv/bin/python scripts/scheduled_scrape.py --zone NSW --retailer bws     # one state, one site (try this first)
+.venv/bin/python scripts/scheduled_scrape.py                                 # everything: 3 sites x 8 states
+.venv/bin/python scripts/scheduled_scrape.py --zones-per-run 2               # only the 2 least-recently-updated states
+BEEROO_SKIP_RETAILERS=liquorland .venv/bin/python scripts/scheduled_scrape.py
 ```
 
-Results go to `data/beeroo.sqlite3` (or `--push` to a server). State and backoff: `data/scrape_state.json` (delete a retailer's `blocked` entry to clear a backoff); logs: `data/scrape.log`.
+Results go to `data/beeroo.sqlite3` (or `--push` to a server). State and backoff: `data/scrape_state.json` (delete a retailer's `blocked` entry to clear a backoff); logs: `data/scrape.log`. `scripts/check_freshness.py` lists every state/retailer and how old its data is.
 
 ## Schedule it (not installed for you)
 
 ```bash
-scripts/install_launchd.sh --print                # review what would be installed
-scripts/install_launchd.sh --hour 11 --minute 30  # install; runs scripts/daily_run.sh
+scripts/install_launchd.sh --print     # review what would be installed
+scripts/install_launchd.sh             # daily 03:00; --hour/--minute to change
 scripts/install_launchd.sh --uninstall
 ```
 
-`daily_run.sh` = scrape, then export the static site, then print a freshness report, then publish (if `BEEROO_PAGES_REMOTE` is set). A visible browser window will appear for a few minutes. A LaunchAgent needs you logged in; if the Mac sleeps it runs on wake.
+`daily_run.sh` = scrape, export the static site, freshness report, publish (if `BEEROO_PAGES_REMOTE` is set). A LaunchAgent needs you logged in; if the Mac sleeps it runs on wake.
 
 ## If a retailer keeps blocking
 
-Stop. Don't try to defeat the block. Use manual captures (`docs/CAPTURE_GUIDE.md`), the extension, or ask the retailer for a feed.
+Stop. Don't try to defeat the block. Leave that retailer out (`BEEROO_SKIP_RETAILERS`) or ask it for a data feed. The site works with whatever retailers have data.

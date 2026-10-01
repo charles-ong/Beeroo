@@ -1,14 +1,15 @@
 #!/bin/sh
 # The whole daily job, on YOUR machine, all free:
-#   1. scrape BWS + Dan Murphy's for Sydney/Canberra/Melbourne/Perth (visible browser)
+#   1. scrape BWS, Liquorland and Dan Murphy's for every state/territory (visible browser)
 #   2. export the static website
-#   3. report anything stale (Liquorland is refreshed by hand)
+#   3. report anything stale
 #   4. publish to your free static host (only if BEEROO_PAGES_REMOTE is set)
 #
 # Secrets/settings come from ~/.config/beeroo/env (chmod 600), e.g.:
 #   BEEROO_PAGES_REMOTE=git@github.com:you/beeroo-site.git
 #   BEEROO_CHROMIUM_PATH=/path/to/chromium      (optional)
-#   BEEROO_ZONES_PER_RUN=1                       (1-4 cities per retailer per day)
+#   BEEROO_ZONES_PER_RUN=8                       (1-8 states per retailer per day; default 8 = all)
+#   BEEROO_SKIP_RETAILERS=liquorland             (comma list of sites to leave out)
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="${BEEROO_ENV_FILE:-$HOME/.config/beeroo/env}"
@@ -26,7 +27,7 @@ PY="$REPO/.venv/bin/python"
 cd "$REPO"
 
 # 1. scrape (exit 3 = blocked, 1 = error; we still export what we have)
-"$PY" scripts/scheduled_scrape.py --jitter "${BEEROO_JITTER:-900}" --zones-per-run "${BEEROO_ZONES_PER_RUN:-1}" "$@"
+"$PY" scripts/scheduled_scrape.py --jitter "${BEEROO_JITTER:-900}" --zones-per-run "${BEEROO_ZONES_PER_RUN:-8}" "$@"
 SCRAPE_CODE=$?
 
 # 2. export + 3. freshness report

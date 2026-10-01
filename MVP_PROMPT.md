@@ -1,3 +1,5 @@
+> **Historical document.** This was the original planning prompt. The project has since changed (state dropdown instead of postcodes, daily scraping of all three sites, free static hosting, no browser extension). See `README.md` and `docs/` for the current design.
+
 # Prompt: Rework Beeroo into an MVP price-comparison web app
 
 Copy everything below the line into a new Claude Code session opened in this repo.

@@ -4,7 +4,7 @@ import statistics
 from datetime import datetime, timezone
 
 from common.db import get_meta
-from common.postcodes import state_for_postcode
+from common.states import STATES, normalise_state
 from common.value import value_metrics
 
 RETAILERS = ["dan_murphys", "bws", "liquorland"]
@@ -35,17 +35,19 @@ def pack_label(pack_type, units):
 # --------------------------------------------------------------------------
 
 
-def resolve_locations(conn, postcode):
-    """Pick the location each retailer's prices come from for a postcode.
+def resolve_locations(conn, state):
+    """Pick the location each retailer's prices come from for a state/territory.
 
-    Prefers a same-state location (exact postcode first, then most recent
-    data); otherwise falls back to the retailer's other location, flagged.
-    Raises ValueError for an invalid postcode.
+    Each location was scraped as "the store nearest the state's postcode"
+    (common/states.py), so the freshest same-state location is used. There is
+    NO cross-state fallback: a retailer with nothing for this state is None and
+    a notice says so (showing another state's prices, or comparing retailers
+    across states, would be wrong). Raises ValueError for an unknown state.
     """
-    state = state_for_postcode(postcode)
+    code = normalise_state(state)
 
-    if state is None:
-        raise ValueError("Enter a valid 4-digit Australian postcode.")
+    if code is None:
+        raise ValueError("Choose a valid state or territory.")
 
     freshness = {
         row["location_key"]: row["latest"]
@@ -56,42 +58,35 @@ def resolve_locations(conn, postcode):
     }
     rows = [
         dict(r) for r in conn.execute("SELECT * FROM locations")
-        if r["location_key"] in freshness
+        if r["location_key"] in freshness and r["state"] == code
     ]
     chosen, notices = {}, []
 
     for retailer in RETAILERS:
-        name = RETAILER_NAMES[retailer]
         candidates = [r for r in rows if r["retailer"] == retailer]
 
         if not candidates:
             chosen[retailer] = None
-            notices.append(f"No {name} prices loaded yet.")
+            notices.append(f"No {RETAILER_NAMES[retailer]} prices for {STATES[code]['name']} yet.")
             continue
 
-        same_state = [r for r in candidates if r["state"] == state]
-        pool = same_state or candidates
-        pool.sort(key=lambda r: freshness[r["location_key"]], reverse=True)
-        pick = next((r for r in pool if r["postcode"] == postcode), pool[0])
-        fallback = not same_state
-
+        pick = max(candidates, key=lambda r: freshness[r["location_key"]])
         chosen[retailer] = {
             "location_key": pick["location_key"],
             "store_name": pick["store_name"],
             "suburb": pick["suburb"],
             "state": pick["state"],
             "postcode": pick["postcode"],
-            "fallback": fallback,
             "latest": freshness[pick["location_key"]],
         }
 
-        if fallback:
-            notices.append(
-                f"{name} prices for {state} aren't loaded yet; showing "
-                f"{pick['state']} prices instead (they can differ by state)."
-            )
-
-    return {"postcode": postcode, "state": state, "retailers": chosen, "notices": notices}
+    return {
+        "state": code,
+        "state_name": STATES[code]["name"],
+        "postcode": STATES[code]["postcode"],   # the postcode we price each state from
+        "retailers": chosen,
+        "notices": notices,
+    }
 
 
 # --------------------------------------------------------------------------
@@ -209,7 +204,7 @@ def _mark_best(product):
         product["min_" + metric] = min((s for s, _ in scored), default=None)
 
 
-def compare(conn, postcode, q="", sort="value", pack_type=None, include_member=False,
+def compare(conn, state, q="", sort="value", pack_type=None, include_member=False,
             retailers=None, min_abv=None, max_abv=None, min_retailers=1,
             limit=50, offset=0, now=None):
     if sort not in SORTS:
@@ -217,7 +212,7 @@ def compare(conn, postcode, q="", sort="value", pack_type=None, include_member=F
     if pack_type and pack_type not in PACK_TYPES:
         raise ValueError(f"pack must be one of {sorted(PACK_TYPES)}")
 
-    locations = resolve_locations(conn, postcode)
+    locations = resolve_locations(conn, state)
     products = load_products(conn, locations, include_member, pack_type, now)
     tokens = q.lower().split()
     wanted = set(retailers) if retailers else None
@@ -290,9 +285,9 @@ def _signal(prices):
     return "usual"
 
 
-def product_detail(conn, product_id, postcode, now=None):
+def product_detail(conn, product_id, state, now=None):
     now = now or datetime.now(timezone.utc)
-    locations = resolve_locations(conn, postcode)
+    locations = resolve_locations(conn, state)
     products = [
         p for p in load_products(conn, locations, include_member=True, now=now)
         if p["id"] == product_id

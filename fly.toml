@@ -7,8 +7,6 @@ primary_region = "syd"
 [env]
   BEEROO_ENV = "production"
   BEEROO_DB = "/data/beeroo.sqlite3"
-  # Public crowd contributions stay closed until you decide (legal review first):
-  BEEROO_CONTRIB_ENABLED = "0"
 
 [[mounts]]
   source = "beeroo_data"

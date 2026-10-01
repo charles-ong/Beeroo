@@ -1,17 +1,19 @@
-"""Polite, unattended scheduled scraping on YOUR OWN machine (cloud/datacenter
-IPs and headless browsers get blocked) for four cities: Sydney, Canberra,
-Melbourne and Perth, at BWS and Dan Murphy's. Liquorland is deliberately NOT
-automated (its robots.txt disallows the API it uses and it shows a CAPTCHA); see
-docs/LIQUORLAND_MANUAL.md.
+"""Polite, unattended daily scraping on YOUR OWN machine (cloud/datacenter IPs and
+headless browsers get blocked) for BWS, Liquorland and Dan Murphy's.
 
-Each run scrapes `--zones-per-run` cities per retailer (default 1: the
-least-recently-updated), in a visible browser window, then stores the prices
-locally or pushes them to a Beeroo server. On any block, or if robots.txt
-forbids the page, that retailer stops, backs off for days and is never retried
-the same day. Retailers back off independently.
+Every state and territory is priced from "the store nearest its postcode"
+(common/states.py, e.g. 2100 for NSW). Each run visits each state once per
+retailer in a visible browser window, interleaving the retailers so no site
+sees back-to-back sessions, then stores the prices locally or pushes them to a
+Beeroo server. If a site shows bot protection or a CAPTCHA we never try to get
+past it: that retailer stops, backs off for days, and is not retried the same
+day. Retailers back off independently.
 
-    python scripts/scheduled_scrape.py                        # both retailers, local DB
-    python scripts/scheduled_scrape.py --retailer bws --zones-per-run 4
+Liquorland note: its robots.txt disallows the /api/ path its pages load data
+from. It is included at your request; skip it with BEEROO_SKIP_RETAILERS=liquorland.
+
+    python scripts/scheduled_scrape.py                           # all retailers, all states
+    python scripts/scheduled_scrape.py --retailer bws --zone NSW  # one state, one site
     BEEROO_SERVER=https://beeroo.example BEEROO_ADMIN_TOKEN=... \\
         python scripts/scheduled_scrape.py --push
 
@@ -35,17 +37,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from common.states import STATES  # noqa: E402
+
 DEFAULT_STATE = ROOT / "data" / "scrape_state.json"
 DEFAULT_DB = ROOT / "data" / "beeroo.sqlite3"
 DEFAULT_LOG = ROOT / "data" / "scrape.log"
 
-# The four cities. The postcode only selects the nearest store via each site's
-# own store picker.
-CITIES = {"2000": "Sydney NSW", "2600": "Canberra ACT", "3000": "Melbourne VIC", "6000": "Perth WA"}
-ZONES = list(CITIES)
-RETAILERS = ("bws", "dan_murphys")        # run order; BWS first (not currently blocked)
-KINDS = {"bws": "bws_products", "dan_murphys": "dan_murphys_browse"}
+ZONES = list(STATES)                       # state codes; postcode = STATES[code]["postcode"]
+RETAILERS = ("bws", "liquorland", "dan_murphys")   # interleave order (the reliable ones first)
+KINDS = {"bws": "bws_products", "liquorland": "liquorland_products", "dan_murphys": "dan_murphys_browse"}
 MIN_COMPLETE = 0.8       # share of the site's reported total we must account for
+MIN_SPACING_S = 180      # minimum average gap between sessions on the SAME site
 MAX_BACKOFF_DAYS = 14
 ROBOTS_BACKOFF_DAYS = 7
 log = logging.getLogger("beeroo.scrape")
@@ -134,13 +136,13 @@ def http_push(server, token, retries=3, timeout=60):
 
 
 def local_push(db_path):
-    from app import contrib
+    from app import ingest
     from common import db
 
     def push(body):
         conn = db.connect(str(db_path))
         try:
-            return contrib.ingest_trusted(conn, contrib.IngestIn.model_validate(body))
+            return ingest.ingest_trusted(conn, ingest.IngestIn.model_validate(body))
         finally:
             conn.close()
 
@@ -160,21 +162,21 @@ def location_dict(loc):
 
 
 def _benign(errors):
-    from app.contrib import BENIGN_ERRORS
+    from app.ingest import BENIGN_ERRORS
     return sum(1 for _, reason in errors if reason in BENIGN_ERRORS)
 
 
 def scrape_one(*, name, zone, scrape, push, rstate, now, max_pages):
-    """One retailer x one city. Returns a result dict (never raises)."""
+    """One retailer x one state. Returns a result dict (never raises)."""
     from scrapers.bws_live import RobotsDisallow
     from scrapers.dan_murphys import Blocked
 
     entry = rstate["zones"].setdefault(zone, {})
     entry["last_attempt"] = now.isoformat()
-    base = {"retailer": name, "zone": zone, "city": CITIES.get(zone, zone)}
+    base = {"retailer": name, "zone": zone, "state": STATES[zone]["name"], "postcode": STATES[zone]["postcode"]}
 
     try:
-        result = asyncio.run(scrape(zone, max_pages))
+        result = asyncio.run(scrape(STATES[zone]["postcode"], max_pages))
     except Blocked as e:
         n = rstate["blocked"].get("consecutive", 0) + 1
         days = min(2 ** n, MAX_BACKOFF_DAYS)
@@ -194,7 +196,7 @@ def scrape_one(*, name, zone, scrape, push, rstate, now, max_pages):
         return {**base, "status": "error", "error": entry["last_error"]}
 
     location, raw_pages = result["location"], result["raw_pages"]
-    total, got = result.get("total"), len(result["products"])
+    total, got = result.get("total"), result.get("collected", len(result["products"]))
     covered = got + _benign(result.get("errors", []))   # out-of-stock items are accounted for
     complete = bool(total) and covered >= MIN_COMPLETE * total
 
@@ -203,7 +205,8 @@ def scrape_one(*, name, zone, scrape, push, rstate, now, max_pages):
         for page in raw_pages:
             r = push({
                 "kind": KINDS[name],
-                "location": location_dict(location),
+                # Liquorland prices are per state and its location comes from the payload itself
+                "location": None if name == "liquorland" else location_dict(location),
                 "payload": page,
                 "observed_at": now.isoformat(),
             })
@@ -225,15 +228,21 @@ def scrape_one(*, name, zone, scrape, push, rstate, now, max_pages):
     return summary
 
 
-def run(*, state_path, scrapes, push, now=None, retailers=None, zones_per_run=1, zone=None,
-        max_pages=60, zones=ZONES, sleep=time.sleep, jitter=0, gap=240):
+def run(*, state_path, scrapes, push, now=None, retailers=None, zones_per_run=len(ZONES), zone=None,
+        max_pages=60, zones=ZONES, sleep=time.sleep, monotonic=time.monotonic, jitter=0,
+        min_spacing=MIN_SPACING_S):
     """Returns (exit_code, summary). `scrapes` maps retailer name -> async
     callable (postcode, max_pages) returning dict(location, raw_pages, products,
-    errors, total); it raises Blocked / RobotsDisallow on bot protection."""
+    errors, total[, collected]); it raises Blocked / RobotsDisallow on bot
+    protection.
+
+    Sessions are interleaved across retailers (BWS NSW, Liquorland NSW, DM NSW,
+    BWS ACT, ...) so each site is naturally spaced by the others' sessions;
+    `min_spacing` is enforced on top for any site visited back to back."""
     now = now or datetime.now(timezone.utc)
     state = load_state(state_path)
     names = [n for n in (retailers or RETAILERS) if n in scrapes]
-    results, started = [], False
+    results, plan = [], {}
 
     for name in names:
         rstate = retailer_state(state, name)
@@ -242,20 +251,33 @@ def run(*, state_path, scrapes, push, now=None, retailers=None, zones_per_run=1,
             log.info("%s: backing off until %s; skipping", name, until.isoformat())
             results.append({"retailer": name, "status": "backing_off", "until": until.isoformat()})
             continue
+        plan[name] = [zone] if zone else pick_zones(rstate, zones, zones_per_run)
 
-        chosen = [zone] if zone else pick_zones(rstate, zones, zones_per_run)
-        for i, z in enumerate(chosen):
+    stopped, last_end, started = set(), {}, False
+
+    for i in range(max((len(v) for v in plan.values()), default=0)):
+        for name in names:
+            if name not in plan or name in stopped or i >= len(plan[name]):
+                continue
+
             if not started and jitter:
                 sleep(random.uniform(0, jitter))
-            elif started and gap:
-                sleep(random.uniform(gap * 0.75, gap * 1.25))   # be slow between cities
             started = True
-            result = scrape_one(name=name, zone=z, scrape=scrapes[name], push=push,
+
+            if name in last_end and min_spacing:
+                wait = min_spacing * random.uniform(0.75, 1.25) - (monotonic() - last_end[name])
+                if wait > 0:
+                    sleep(wait)
+
+            rstate = retailer_state(state, name)
+            result = scrape_one(name=name, zone=plan[name][i], scrape=scrapes[name], push=push,
                                 rstate=rstate, now=now, max_pages=max_pages)
+            last_end[name] = monotonic()
             results.append(result)
             save_state(state_path, state)
+
             if result["status"] in ("blocked", "robots_disallow", "error", "push_failed"):
-                break   # stop this retailer for today; other retailers still run
+                stopped.add(name)   # this retailer is done for today; the others carry on
 
     save_state(state_path, state)
     statuses = {r["status"] for r in results}
@@ -277,18 +299,22 @@ def browser_scrape(driver_scrape, browser_path=None):
                     viewport={"width": 1440, "height": 900}, locale="en-AU", timezone_id="Australia/Sydney",
                 )
                 page = await context.new_page()
-                location, products, errors, total = await driver_scrape(page, postcode, max_pages, raw_pages=raw)
+                location, products, errors, total, *extra = await driver_scrape(page, postcode, max_pages, raw_pages=raw)
             finally:
                 await browser.close()
-        return {"location": location, "raw_pages": raw, "products": products, "errors": errors, "total": total}
+        result = {"location": location, "raw_pages": raw, "products": products, "errors": errors, "total": total}
+        if extra:
+            result.update(extra[0])
+        return result
 
     return scrape
 
 
 def real_scrapes(browser_path=None):
-    from scrapers import bws_live, dan_murphys
+    from scrapers import bws_live, dan_murphys, liquorland_live
     return {
         "bws": browser_scrape(bws_live.scrape, browser_path),
+        "liquorland": browser_scrape(liquorland_live.scrape, browser_path),
         "dan_murphys": browser_scrape(dan_murphys.scrape, browser_path),
     }
 
@@ -303,18 +329,22 @@ def setup_logging(path):
     log.setLevel(logging.INFO)
 
 
+def skipped_retailers(environ=os.environ):
+    return {x.strip() for x in environ.get("BEEROO_SKIP_RETAILERS", "").split(",") if x.strip()}
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--retailer", choices=["all", *RETAILERS], default="all")
-    ap.add_argument("--zones-per-run", type=int, default=1, choices=range(1, len(ZONES) + 1),
-                    help="cities per retailer per run (1-4; default 1)")
-    ap.add_argument("--zone", choices=ZONES, help="force one city's postcode (testing)")
+    ap.add_argument("--zones-per-run", type=int, default=len(ZONES), choices=range(1, len(ZONES) + 1),
+                    help=f"states per retailer per run (default {len(ZONES)} = every state and territory)")
+    ap.add_argument("--zone", choices=ZONES, help="force one state/territory (testing)")
     ap.add_argument("--push", action="store_true", help="push to $BEEROO_SERVER using $BEEROO_ADMIN_TOKEN (default: local DB)")
     ap.add_argument("--db", default=str(DEFAULT_DB))
     ap.add_argument("--state", default=str(DEFAULT_STATE))
     ap.add_argument("--max-pages", type=int, default=60)
     ap.add_argument("--jitter", type=int, default=0, help="random start delay up to N seconds")
-    ap.add_argument("--gap", type=int, default=240, help="average seconds to wait between cities")
+    ap.add_argument("--min-spacing", type=int, default=MIN_SPACING_S, help="min average seconds between sessions on the same site")
     ap.add_argument("--browser-path", default=os.environ.get("BEEROO_CHROMIUM_PATH"))
     args = ap.parse_args(argv)
 
@@ -337,11 +367,16 @@ def main(argv=None):
     else:
         push = local_push(args.db)
 
+    skip = skipped_retailers()
+    chosen = list(RETAILERS) if args.retailer == "all" else [args.retailer]
+    chosen = [r for r in chosen if r not in skip]
+    if skip & set(RETAILERS):
+        log.info("skipping (BEEROO_SKIP_RETAILERS): %s", ", ".join(sorted(skip & set(RETAILERS))))
+
     code, summary = run(
         state_path=args.state, scrapes=real_scrapes(args.browser_path), push=push,
-        retailers=None if args.retailer == "all" else [args.retailer],
-        zones_per_run=args.zones_per_run, zone=args.zone, max_pages=args.max_pages,
-        jitter=args.jitter, gap=args.gap,
+        retailers=chosen, zones_per_run=args.zones_per_run, zone=args.zone,
+        max_pages=args.max_pages, jitter=args.jitter, min_spacing=args.min_spacing,
     )
     print(json.dumps(summary))
     return code

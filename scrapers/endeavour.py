@@ -6,6 +6,7 @@ Pure functions only: no browser, no network. Tested against saved fixtures.
 import re
 
 from common.records import (
+    pack_type_for_units,
     Listing,
     PackType,
     PriceObservation,
@@ -65,7 +66,7 @@ def _units_and_type(message, price, pack_sizes):
         if not per_unit:
             return None
         units = quantity * per_unit
-        return units, PackType.CASE if noun == "case" else PackType.PACK
+        return units, PackType.CASE if noun == "case" else pack_type_for_units(units)
 
     match = _UNITS_IN_BRACKETS.search(message)
     if match:
@@ -75,9 +76,8 @@ def _units_and_type(message, price, pack_sizes):
     else:
         return None
 
-    if (price.get("PackType") or "").lower() == "case":
-        return units, PackType.CASE
-    return units, PackType.SINGLE if units == 1 else PackType.PACK
+    # The unit count decides, not the retailer's wording (DM calls an 8-pack a "case").
+    return units, pack_type_for_units(units)
 
 
 def parse_prices(product, location_key, observed_at):

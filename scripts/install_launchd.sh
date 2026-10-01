@@ -2,7 +2,7 @@
 # Install (or remove) the daily job (scrape -> export -> publish) as a macOS LaunchAgent.
 #
 #   scripts/install_launchd.sh --print                 # show the plist, change nothing
-#   scripts/install_launchd.sh [--hour 11 --minute 30] # install + load
+#   scripts/install_launchd.sh [--hour 3 --minute 0]   # install + load (default 03:00)
 #   scripts/install_launchd.sh --uninstall
 #
 # A LaunchAgent runs in your logged-in session (needed: the browser window is
@@ -12,7 +12,7 @@ set -eu
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 LABEL="com.beeroo.scrape"
 TARGET="$HOME/Library/LaunchAgents/$LABEL.plist"
-HOUR=11; MINUTE=30; MODE=install
+HOUR=3; MINUTE=0; MODE=install
 
 while [ $# -gt 0 ]; do
   case "$1" in

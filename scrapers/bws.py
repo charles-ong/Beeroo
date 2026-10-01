@@ -7,6 +7,7 @@ with one shelf `Price` per product. ABV is in AdditionalDetails "alcohol%".
 import re
 
 from common.records import (
+    pack_type_for_units,
     Listing,
     Location,
     PackType,
@@ -90,10 +91,8 @@ def _units(product):
     return 1
 
 
-def _pack_type(units, base_units):
-    if units == 1:
-        return PackType.SINGLE
-    return PackType.CASE if base_units >= CASE_MIN_UNITS else PackType.PACK
+def _pack_type(units, base_units=None):
+    return pack_type_for_units(units)
 
 
 def parse_item_prices(products, location_key, observed_at):

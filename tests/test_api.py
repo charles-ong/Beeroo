@@ -44,42 +44,72 @@ def conn(db_path):
 
 
 def test_locations_pick_same_state(client):
-    act = client.get("/api/locations", params={"postcode": "2606"}).json()
+    act = client.get("/api/locations", params={"state": "ACT"}).json()
     assert act["state"] == "ACT"
-    assert act["retailers"]["bws"]["store_name"] == "Woden" and not act["retailers"]["bws"]["fallback"]
+    assert act["retailers"]["bws"]["store_name"] == "Woden"
     assert act["retailers"]["liquorland"]["location_key"] == "liquorland:ll_act"
 
-    wa = client.get("/api/locations", params={"postcode": "6000"}).json()
+    wa = client.get("/api/locations", params={"state": "WA"}).json()
     assert wa["retailers"]["bws"]["store_name"] == "Murray Street"
     assert wa["retailers"]["liquorland"]["location_key"] == "liquorland:ll_wa"
 
 
-def test_missing_retailer_and_fallback_notices(client):
-    vic = client.get("/api/locations", params={"postcode": "3000"}).json()
-    text = " ".join(vic["notices"])
-    assert "No Dan Murphy's prices loaded yet." in vic["notices"]
-    assert "BWS prices for VIC aren't loaded yet" in text
-    assert vic["retailers"]["bws"]["fallback"] is True
+def test_no_cross_state_fallback_a_missing_retailer_is_simply_absent(client):
+    """Showing another state's prices (or comparing retailers across states) would be wrong."""
+    vic = client.get("/api/locations", params={"state": "VIC"}).json()
+    assert all(loc is None for loc in vic["retailers"].values())              # nothing loaded for Victoria
+    assert vic["notices"] == [f"No {n} prices for Victoria yet." for n in ("Dan Murphy's", "BWS", "Liquorland")]
+    assert "fallback" not in json.dumps(vic)
+    data = client.get("/api/compare", params={"state": "VIC"}).json()
+    assert data["products"] == [] and data["meta"]["total"] == 0               # NOT another state's products
+
+    act = client.get("/api/locations", params={"state": "ACT"}).json()          # partial coverage inside a state
+    assert act["retailers"]["bws"] and act["retailers"]["liquorland"] and act["retailers"]["dan_murphys"] is None
+    assert act["notices"] == ["No Dan Murphy's prices for Australian Capital Territory yet."]
 
 
-@pytest.mark.parametrize("bad", ["abc", "123", "12345", "0000", "99999"])
-def test_invalid_postcode_is_400(client, bad):
-    assert client.get("/api/compare", params={"postcode": bad}).status_code == 400
+def test_prices_for_one_state_never_leak_into_another(client):
+    act_ids = {p["id"] for p in client.get("/api/compare", params={"state": "ACT", "limit": 200}).json()["products"]}
+    wa = client.get("/api/compare", params={"state": "WA", "limit": 200}).json()
+    for p in wa["products"]:
+        for retailer, entry in p["retailers"].items():
+            assert wa["locations"]["retailers"][retailer]["state"] == "WA"
+    assert act_ids and client.get("/api/compare", params={"state": "TAS"}).json()["meta"]["total"] == 0
 
 
-def test_compare_prices_differ_by_postcode(client):
+@pytest.mark.parametrize("bad", ["", "XX", "abc", "2606", "N S W", "ACT;DROP"])
+def test_invalid_state_is_400(client, bad):
+    assert client.get("/api/compare", params={"state": bad}).status_code == 400
+    assert client.get("/api/locations", params={"state": bad}).status_code == 400
+
+
+def test_state_is_required_and_case_insensitive(client):
+    assert client.get("/api/compare").status_code == 422
+    lower = client.get("/api/compare", params={"state": "act"}).json()
+    assert lower["locations"]["state"] == "ACT"
+
+
+def test_states_endpoint_lists_every_state_with_its_pricing_postcode(client):
+    states = client.get("/api/states").json()["states"]
+    assert [s["code"] for s in states] == ["ACT", "NSW", "NT", "QLD", "SA", "TAS", "VIC", "WA"]   # by name
+    by = {s["code"]: s for s in states}
+    assert by["NSW"] == {"code": "NSW", "name": "New South Wales", "postcode": "2100"}
+    assert all(len(s["postcode"]) == 4 for s in states)
+
+
+def test_compare_prices_differ_by_state(client):
     def case_price(pc):
-        data = client.get("/api/compare", params={"postcode": pc, "q": "great northern original lager 330"}).json()
+        data = client.get("/api/compare", params={"state": pc, "q": "great northern original lager 330"}).json()
         prod = next(p for p in data["products"] if "Original Lager" in p["name"] and "Bottle" in p["name"] or p["retailers"].get("bws"))
         opt = next(o for o in prod["retailers"]["bws"]["options"] if o["label"] == "Case of 24")
         return opt["price"]
 
-    assert case_price("2606") == 54.0
-    assert case_price("6000") == 62.0
+    assert case_price("ACT") == 54.0
+    assert case_price("WA") == 62.0
 
 
 def test_value_sort_puts_unknown_abv_last_and_is_ascending(client):
-    products = client.get("/api/compare", params={"postcode": "2606", "limit": 200}).json()["products"]
+    products = client.get("/api/compare", params={"state": "ACT", "limit": 200}).json()["products"]
     values = [p["min_price_per_standard_drink"] for p in products]
     known = [v for v in values if v is not None]
     assert known == sorted(known)
@@ -88,7 +118,7 @@ def test_value_sort_puts_unknown_abv_last_and_is_ascending(client):
 
 
 def test_cheapest_retailer_is_flagged_only_when_two_compete(client):
-    products = client.get("/api/compare", params={"postcode": "2606", "limit": 200}).json()["products"]
+    products = client.get("/api/compare", params={"state": "ACT", "limit": 200}).json()["products"]
     multi = [p for p in products if len(p["retailers"]) >= 2 and p["best_value_retailer"]]
     assert multi
     for p in multi:
@@ -102,22 +132,22 @@ def test_cheapest_retailer_is_flagged_only_when_two_compete(client):
 
 
 def test_member_offers_hidden_by_default(client):
-    off = client.get("/api/compare", params={"postcode": "2606", "limit": 200}).json()["products"]
-    on = client.get("/api/compare", params={"postcode": "2606", "limit": 200, "include_member": True}).json()["products"]
+    off = client.get("/api/compare", params={"state": "ACT", "limit": 200}).json()["products"]
+    on = client.get("/api/compare", params={"state": "ACT", "limit": 200, "include_member": True}).json()["products"]
     count = lambda ps: sum(len(e["options"]) for p in ps for e in p["retailers"].values())
     assert not any(o["member_only"] for p in off for e in p["retailers"].values() for o in e["options"])
     assert count(on) > count(off)
 
 
 def test_pack_filter_and_abv_filter(client):
-    data = client.get("/api/compare", params={"postcode": "2606", "pack": "case", "limit": 200}).json()
+    data = client.get("/api/compare", params={"state": "ACT", "pack": "case", "limit": 200}).json()
     assert all(o["pack_type"] == "case" for p in data["products"] for e in p["retailers"].values() for o in e["options"])
-    strong = client.get("/api/compare", params={"postcode": "2606", "min_abv": 5, "limit": 200}).json()["products"]
+    strong = client.get("/api/compare", params={"state": "ACT", "min_abv": 5, "limit": 200}).json()["products"]
     assert strong and all(p["abv"] >= 5 for p in strong)
 
 
 def test_abv_source_is_exposed_for_borrowed_abv(conn):
-    data = queries.compare(conn, "2606", limit=500)
+    data = queries.compare(conn, "ACT", limit=500)
     borrowed = [p for p in data["products"] if "liquorland" in p["retailers"] and p["abv_source"] == "bws"]
     assert borrowed
     p = borrowed[0]
@@ -125,7 +155,7 @@ def test_abv_source_is_exposed_for_borrowed_abv(conn):
 
 
 def test_liquorland_only_unknown_abv_has_no_value(conn):
-    data = queries.compare(conn, "2606", limit=500)
+    data = queries.compare(conn, "ACT", limit=500)
     unknown = [p for p in data["products"] if p["abv"] is None]
     assert unknown
     for p in unknown:
@@ -135,27 +165,27 @@ def test_liquorland_only_unknown_abv_has_no_value(conn):
 
 
 def test_stale_flag(conn):
-    data = queries.compare(conn, "2606", limit=500, now=NOW + timedelta(days=30))
+    data = queries.compare(conn, "ACT", limit=500, now=NOW + timedelta(days=30))
     assert all(e["stale"] for p in data["products"] for e in p["retailers"].values())
-    fresh = queries.compare(conn, "2606", limit=500, now=NOW)
+    fresh = queries.compare(conn, "ACT", limit=500, now=NOW)
     assert not any(e["stale"] for p in fresh["products"] for e in p["retailers"].values())
 
 
 def test_bad_sort_and_pack_are_400(client):
-    assert client.get("/api/compare", params={"postcode": "2606", "sort": "nope"}).status_code == 400
-    assert client.get("/api/compare", params={"postcode": "2606", "pack": "nope"}).status_code == 400
-    assert client.get("/api/compare", params={"postcode": "2606", "retailer": "x"}).status_code == 400
+    assert client.get("/api/compare", params={"state": "ACT", "sort": "nope"}).status_code == 400
+    assert client.get("/api/compare", params={"state": "ACT", "pack": "nope"}).status_code == 400
+    assert client.get("/api/compare", params={"state": "ACT", "retailer": "x"}).status_code == 400
 
 
 def test_product_detail_and_404(client):
-    pid = client.get("/api/compare", params={"postcode": "2606"}).json()["products"][0]["id"]
-    detail = client.get(f"/api/products/{pid}", params={"postcode": "2606"})
+    pid = client.get("/api/compare", params={"state": "ACT"}).json()["products"][0]["id"]
+    detail = client.get(f"/api/products/{pid}", params={"state": "ACT"})
     assert detail.status_code == 200
     body = detail.json()
     assert body["history"] and not body["demo"]
     series = next(iter(next(iter(body["history"].values())).values()))
     assert series["n"] == 1 and series["signal"] == "not_enough_history"
-    assert client.get("/api/products/999999", params={"postcode": "2606"}).status_code == 404
+    assert client.get("/api/products/999999", params={"state": "ACT"}).status_code == 404
 
 
 def test_history_signal(conn):
@@ -185,10 +215,10 @@ def test_demo_db_is_flagged_and_history_is_simulated_only_in_past(tmp_path):
     assert n > 100
 
     client = TestClient(create_app(str(out)))
-    data = client.get("/api/compare", params={"postcode": "2606"}).json()
+    data = client.get("/api/compare", params={"state": "ACT"}).json()
     assert data["meta"]["demo"] is True
     pid = data["products"][0]["id"]
-    detail = client.get(f"/api/products/{pid}", params={"postcode": "2606"}).json()
+    detail = client.get(f"/api/products/{pid}", params={"state": "ACT"}).json()
     assert detail["demo"] is True
     series = next(iter(next(iter(detail["history"].values())).values()))
     assert series["n"] == 9  # 1 real + 8 simulated weekly points
@@ -211,7 +241,7 @@ def test_latest_price_is_by_observation_time_not_insert_order(tmp_path):
          row["price"] + 50, "2026-08-01T00:00:00+00:00"),
     )
     conn.commit()
-    data = queries.compare(conn, "2606", limit=500, now=NOW)
+    data = queries.compare(conn, "ACT", limit=500, now=NOW)
     prices = {o["price"] for p in data["products"] for e in p["retailers"].values() for o in e["options"]}
     assert row["price"] + 50 not in prices
     assert not any(e["stale"] for p in data["products"] for e in p["retailers"].values())

@@ -15,6 +15,17 @@ class PackType(str, Enum):
     CASE = "case"
 
 
+CASE_MIN_UNITS = 12
+
+
+def pack_type_for_units(units):
+    """One rule for every retailer so the pack filter means the same thing
+    everywhere: 1 = single, 2-11 = pack, 12 or more = case."""
+    if units <= 1:
+        return PackType.SINGLE
+    return PackType.CASE if units >= CASE_MIN_UNITS else PackType.PACK
+
+
 class Retailer(str, Enum):
     DAN_MURPHYS = "dan_murphys"
     BWS = "bws"

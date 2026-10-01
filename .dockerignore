@@ -3,7 +3,6 @@
 .github
 data
 tests
-extension
 docs
 deploy
 *.har

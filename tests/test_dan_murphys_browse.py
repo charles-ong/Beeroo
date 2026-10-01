@@ -79,7 +79,7 @@ def test_multibuy_bottles_total_units(by_sku):
 
 def test_multibuy_packs_total_units(by_sku):
     s = series(by_sku["440975"])  # Kopparberg: $36 for 2 packs of 6
-    assert s[(PackType.PACK, 12, True)] == 36.0
+    assert s[(PackType.CASE, 12, True)] == 36.0          # 12 units = a case under the shared rule
     assert s[(PackType.PACK, 6, False)] == 22.99
 
 

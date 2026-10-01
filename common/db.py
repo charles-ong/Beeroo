@@ -55,52 +55,6 @@ CREATE TABLE IF NOT EXISTS price_observations (
     observed_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS installs (
-    install_hash TEXT PRIMARY KEY,
-    first_seen TEXT NOT NULL,
-    accepted INTEGER NOT NULL DEFAULT 0,
-    rejected INTEGER NOT NULL DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS contributions (
-    id INTEGER PRIMARY KEY,
-    install_hash TEXT NOT NULL,
-    retailer TEXT NOT NULL,
-    location_key TEXT,
-    received_at TEXT NOT NULL,
-    payload_hash TEXT,
-    n_products INTEGER NOT NULL DEFAULT 0,
-    n_errors INTEGER NOT NULL DEFAULT 0,
-    status TEXT NOT NULL,
-    reason TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_contrib_install ON contributions (install_hash, received_at);
-
-CREATE TABLE IF NOT EXISTS staged_observations (
-    id INTEGER PRIMARY KEY,
-    contribution_id INTEGER NOT NULL REFERENCES contributions(id),
-    install_hash TEXT NOT NULL,
-    retailer TEXT NOT NULL,
-    location_key TEXT NOT NULL,
-    retailer_sku TEXT NOT NULL,
-    pack_type TEXT NOT NULL,
-    units INTEGER NOT NULL,
-    member_only INTEGER NOT NULL,
-    price REAL NOT NULL,
-    received_at TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    url TEXT NOT NULL,
-    name TEXT NOT NULL,
-    brand TEXT,
-    category TEXT,
-    abv REAL,
-    unit_volume_ml REAL
-);
-
-CREATE INDEX IF NOT EXISTS idx_staged_series ON staged_observations
-    (retailer, location_key, retailer_sku, pack_type, units, member_only, status);
-
 CREATE INDEX IF NOT EXISTS idx_obs_series ON price_observations
     (listing_id, location_key, pack_type, units, member_only, observed_at);
 """

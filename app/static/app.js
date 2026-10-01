@@ -6,7 +6,7 @@ const RETAILERS = [
 ];
 const PAGE = 40;
 const $ = (id) => document.getElementById(id);
-const state_ = { postcode: "", offset: 0, lastQuery: "" };
+const state_ = { region: "", offset: 0, states: [] };
 
 // ---- tiny safe DOM builder (text only; never builds HTML strings) ----------
 function h(tag, attrs, ...kids) {
@@ -46,19 +46,17 @@ async function loadJson(path) {
   }
   try { return await jsonCache.get(path); } catch (e) { jsonCache.delete(path); throw e; }
 }
-async function staticState(postcode) {
-  const S = window.BeerooStatic;
-  const state = S.stateForPostcode(postcode);
-  if (!state) throw new Error("Enter a valid 4-digit Australian postcode.");
+async function staticState(region) {
+  if (!region) throw new Error("Choose your state or territory.");
   const manifest = await loadJson("data/manifest.json");
-  if (!manifest.states.includes(state)) {
-    throw new Error(`This version only has prices for ${manifest.states.join(", ")}. Try a postcode in one of those states.`);
+  if (!manifest.states.includes(region)) {
+    throw new Error(`No prices for ${region} yet. Available now: ${manifest.states.join(", ") || "none"}.`);
   }
-  return state;
+  return region;
 }
 async function staticCompare(p, limit, offset) {
   const S = window.BeerooStatic;
-  const state = await staticState(p.postcode);
+  const state = await staticState(p.state);
   const payload = await loadJson(S.variantPath(state, p.include_member, p.pack));
   return S.applyQuery(payload, {
     q: p.q, sort: p.sort, limit, offset,
@@ -67,7 +65,7 @@ async function staticCompare(p, limit, offset) {
   });
 }
 async function staticDetail(id) {
-  const state = await staticState(state_.postcode);
+  const state = await staticState(state_.region);
   return loadJson(window.BeerooStatic.detailPath(state, id));
 }
 
@@ -85,7 +83,7 @@ async function api(path, params) {
 }
 function filterParams() {
   return {
-    postcode: state_.postcode, q: $("q").value.trim(), sort: $("sort").value, pack: $("pack").value,
+    state: state_.region, q: $("q").value.trim(), sort: $("sort").value, pack: $("pack").value,
     min_abv: $("min_abv").value, max_abv: $("max_abv").value,
     include_member: $("include_member").checked, min_retailers: $("multi").checked ? 2 : "",
   };
@@ -129,11 +127,12 @@ function card(p) {
   return node;
 }
 function renderLocations(loc) {
+  if (loc.postcode) $("state-postcode").textContent = loc.postcode + " (" + loc.state_name + ")";
   $("notices").replaceChildren(...loc.notices.map((n) => h("div", { class: "banner notice" }, n)));
   const parts = RETAILERS.map((r) => {
     const l = loc.retailers[r.id];
     if (!l) return null;
-    const name = l.store_name ? l.store_name + (l.suburb && l.suburb !== l.store_name ? ", " + l.suburb : "") : l.state + " pricing";
+    const name = l.store_name ? l.store_name + (l.suburb && !l.store_name.includes(l.suburb) ? ", " + l.suburb : "") : l.state + " pricing";
     const where = name.includes(l.state) ? name : `${name} (${l.state})`;
     return `${r.name}: ${where}`;
   }).filter(Boolean);
@@ -141,7 +140,7 @@ function renderLocations(loc) {
 }
 
 async function search(append) {
-  if (!state_.postcode) return;
+  if (!state_.region) return;
   if (!append) state_.offset = 0;
   try {
     const data = STATIC_MODE
@@ -152,19 +151,22 @@ async function search(append) {
     $("filters").hidden = false;
     const list = $("results");
     if (!append) list.replaceChildren();
+    const anyData = Object.values(data.locations.retailers).some(Boolean);
     if (!data.products.length && !append) {
-      list.append(h("div", { class: "empty-state" }, "No products match these filters for this postcode. Try clearing some filters."));
+      list.append(h("div", { class: "empty-state" }, anyData
+        ? "No products match these filters for this state. Try clearing some filters."
+        : `No prices for ${data.locations.state_name} yet.`));
     }
     data.products.forEach((p) => list.append(card(p)));
     state_.offset += data.products.length;
     $("more").hidden = state_.offset >= data.meta.total;
-    $("summary").textContent = `${data.meta.total} product${data.meta.total === 1 ? "" : "s"} · postcode ${state_.postcode} (${data.locations.state})`
+    $("summary").textContent = `${data.meta.total} product${data.meta.total === 1 ? "" : "s"} · ${data.locations.state_name}`
       + (data.meta.latest_data ? " · latest data " + ago(data.meta.latest_data) : "");
     const url = new URL(location.href);
-    url.search = new URLSearchParams({ postcode: state_.postcode }).toString();
+    url.search = new URLSearchParams({ state: state_.region }).toString();
     history.replaceState(null, "", url);
   } catch (e) {
-    showPostcodeError(e.message);
+    showStateError(e.message);
   }
 }
 
@@ -255,26 +257,25 @@ function detailBody(d) {
 }
 async function openDetail(id) {
   try {
-    const d = STATIC_MODE ? await staticDetail(id) : await api("/api/products/" + id, { postcode: state_.postcode });
+    const d = STATIC_MODE ? await staticDetail(id) : await api("/api/products/" + id, { state: state_.region });
     $("detail-body").replaceChildren(detailBody(d));
     $("detail").showModal();
   } catch (e) { alert(e.message); }
 }
 
 // ---- Wiring -----------------------------------------------------------------
-function showPostcodeError(msg) {
-  const el = $("postcode-error");
+function showStateError(msg) {
+  const el = $("state-error");
   el.textContent = msg; el.hidden = !msg;
 }
-function submitPostcode(e) {
-  e && e.preventDefault();
-  const pc = $("postcode").value.trim();
-  if (!/^\d{4}$/.test(pc)) return showPostcodeError("Enter a valid 4-digit Australian postcode.");
-  showPostcodeError("");
-  state_.postcode = pc; save("beeroo.postcode", pc);
+function chooseState(code) {
+  showStateError("");
+  state_.region = code;
+  if (code) save("beeroo.state", code);
+  if (!code) { $("results").replaceChildren(); $("summary").textContent = ""; $("filters").hidden = true; return; }
   search(false);
 }
-$("postcode-form").addEventListener("submit", submitPostcode);
+$("state").addEventListener("change", () => chooseState($("state").value));
 $("more").addEventListener("click", () => search(true));
 $("detail-close").addEventListener("click", () => $("detail").close());
 $("detail").addEventListener("click", (e) => { if (e.target === $("detail")) $("detail").close(); });
@@ -282,6 +283,23 @@ let timer;
 for (const id of ["q", "min_abv", "max_abv"]) $(id).addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => search(false), 300); });
 for (const id of ["sort", "pack", "include_member", "multi"]) $(id).addEventListener("change", () => search(false));
 
-const fromUrl = new URLSearchParams(location.search).get("postcode");
-const initial = fromUrl || store("beeroo.postcode");
-if (initial && /^\d{4}$/.test(initial)) { $("postcode").value = initial; submitPostcode(); }
+async function loadStates() {
+  if (STATIC_MODE) {
+    const manifest = await loadJson("data/manifest.json");
+    return manifest.all_states.map((s) => ({ ...s, covered: manifest.states.includes(s.code) }));
+  }
+  return (await api("/api/states")).states;
+}
+async function init() {
+  try {
+    state_.states = await loadStates();
+  } catch (e) { return showStateError("Couldn't load the list of states. Please reload."); }
+  const select = $("state");
+  for (const s of state_.states) {
+    select.append(h("option", { value: s.code }, s.name + (s.covered === false ? " (no prices yet)" : "")));
+  }
+  const fromUrl = (new URLSearchParams(location.search).get("state") || "").toUpperCase();
+  const initial = state_.states.some((s) => s.code === fromUrl) ? fromUrl : store("beeroo.state");
+  if (initial && state_.states.some((s) => s.code === initial)) { select.value = initial; chooseState(initial); }
+}
+init();

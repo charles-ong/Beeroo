@@ -6,13 +6,15 @@ set per *state* (site state ll_act, ll_wa, ...), not per store, so the
 location key is state-level. ABV is not in the list; it comes from the
 per-product detail response (alcoholPercent).
 
-NOTE: Liquorland's robots.txt disallows /api/*, which is where this data
-comes from. These parsers are for data captured manually (see
-docs/CAPTURE_GUIDE.md); do not point an automated scraper at those URLs.
+NOTE: Liquorland's robots.txt disallows /api/*, where this data comes from. The
+live driver (scrapers/liquorland_live.py) reads it from a normal visible browser
+page at the operator's request, never solves or evades a CAPTCHA, and can be
+switched off with BEEROO_SKIP_RETAILERS=liquorland. See docs/SCHEDULED_SCRAPE.md.
 """
 import re
 
 from common.records import (
+    pack_type_for_units,
     Listing,
     Location,
     PackType,
@@ -60,7 +62,7 @@ def _units_and_type(uom):
     if not count:
         raise ValueError(f"no pack size in {uom!r}")
 
-    return int(count), PackType.CASE if kind == "ctn" else PackType.PACK
+    return int(count), PackType.CASE if kind == "ctn" else pack_type_for_units(int(count))
 
 
 def _entry_prices(entry, location_key, observed_at):
@@ -94,7 +96,7 @@ def _entry_prices(entry, location_key, observed_at):
         add(
             multibuy.group(2),
             count * units,
-            kind=pack_type if units > 1 else PackType.PACK,
+            kind=pack_type_for_units(count * units),
         )
 
     return observations
@@ -183,3 +185,23 @@ def parse_suburb_search(payload):
         (row["suburb"], row["state"], row["postcode"])
         for row in (payload or {}).get("data") or []
     ]
+
+
+def minimal_payload(payload):
+    """Only what the parser reads: the site state and per-entry price/size/url.
+    (A full page is ~90 KB of images, ratings and navigation.)"""
+    site = site_state(payload)
+    return {
+        "debugQuery": f"sitestate={site}" if site else "",
+        "meta": {"page": {k: ((payload.get("meta") or {}).get("page") or {}).get(k)
+                           for k in ("current", "total", "size", "productCount")}},
+        "products": [
+            {
+                **{k: p[k] for k in ("id", "name", "brand", "isAvailable", "volumeMl", "unitOfMeasure", "productUrl") if k in p},
+                "price": {k: (p.get("price") or {}).get(k)
+                          for k in ("current", "normal", "acrossAnySix", "memberOnlyPrice")},
+                "promotion": {"calloutText": (p.get("promotion") or {}).get("calloutText")},
+            }
+            for p in payload.get("products") or []
+        ],
+    }

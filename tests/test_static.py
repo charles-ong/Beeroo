@@ -16,7 +16,6 @@ import export_static  # noqa: E402
 
 from app import queries  # noqa: E402
 from common import db  # noqa: E402
-from common.postcodes import state_for_postcode  # noqa: E402
 
 ROOT = Path(__file__).parent.parent
 NODE = shutil.which("node")
@@ -31,7 +30,7 @@ def site(tmp_path_factory):
     build_demo_db.simulate_history(conn)
     db.set_meta(conn, "demo", "1")
     out = base / "site"
-    stats = export_static.export(conn, out, ["NSW", "ACT", "VIC", "WA", "QLD"])
+    stats = export_static.export(conn, out)
     export_static.copy_site(out)
     return {"conn": conn, "out": out, "stats": stats}
 
@@ -42,13 +41,16 @@ def site(tmp_path_factory):
 def test_export_writes_manifest_variants_and_details(site):
     out, stats = site["out"], site["stats"]
     manifest = json.loads((out / "data" / "manifest.json").read_text())
-    assert manifest["demo"] is True and set(manifest["states"]) == {"NSW", "ACT", "VIC", "WA", "QLD"}
+    # only states with data of their own are exported: the demo data covers NSW (Dan Murphy's), ACT and WA
+    assert manifest["demo"] is True and set(manifest["states"]) == {"NSW", "ACT", "WA"}
+    assert [s["code"] for s in manifest["all_states"]] == ["ACT", "NSW", "NT", "QLD", "SA", "TAS", "VIC", "WA"]
+    assert {s["code"]: s["postcode"] for s in manifest["all_states"]}["NSW"] == "2100"
     for state in manifest["states"]:
         for member in (0, 1):
             for pack in ("any", "single", "pack", "case"):
                 assert (out / "data" / state / f"{member}-{pack}.json").exists()
     assert stats["files"] > 100
-    assert stats["bytes"] / 1e6 < 30
+    assert stats["bytes"] / 1e6 < 60
 
 
 def test_every_listed_product_has_a_detail_file_matching_the_server(site):
@@ -57,7 +59,7 @@ def test_every_listed_product_has_a_detail_file_matching_the_server(site):
     assert variant["products"]
     for p in variant["products"][:15]:
         detail = json.loads((out / "data" / "ACT" / "p" / f"{p['id']}.json").read_text())
-        expected = queries.product_detail(conn, p["id"], "2600")
+        expected = queries.product_detail(conn, p["id"], "ACT")
         assert detail["product"]["id"] == p["id"]
         assert detail["history"] == json.loads(json.dumps(expected["history"]))
 
@@ -80,7 +82,7 @@ def test_server_index_uses_the_same_relative_paths():
     assert 'src="static/staticdata.js"' in html and 'name="beeroo-mode"' not in html
 
 
-def test_states_without_any_data_are_not_exported(tmp_path):
+def test_nothing_is_exported_for_an_empty_database(tmp_path):
     conn = db.connect(str(tmp_path / "empty.sqlite3"))
     stats = export_static.export(conn, tmp_path / "s", ["NSW", "WA"])
     assert stats["states"] == []
@@ -100,14 +102,14 @@ def test_browser_side_filtering_and_sorting_matches_the_server(site):
         pytest.skip("node not installed")
     cases, expected = [], {}
     for i, c in enumerate(CASES):
-        for postcode in ("2606", "6000", "2000"):
-            name = f"{i}:{postcode}"
+        for state in ("ACT", "WA", "NSW"):
+            name = f"{i}:{state}"
             cases.append({
-                "name": name, "postcode": postcode, "pack": c["pack"], "include_member": c["member"],
+                "name": name, "state": state, "pack": c["pack"], "include_member": c["member"],
                 "query": {"q": c["q"], "sort": c["sort"], "min_retailers": c["min_retailers"],
                           "min_abv": c["abv"][0], "max_abv": c["abv"][1]},
             })
-            r = queries.compare(site["conn"], postcode, q=c["q"], sort=c["sort"], pack_type=c["pack"],
+            r = queries.compare(site["conn"], state, q=c["q"], sort=c["sort"], pack_type=c["pack"],
                                 include_member=c["member"], min_retailers=c["min_retailers"],
                                 min_abv=c["abv"][0], max_abv=c["abv"][1], limit=1000)
             expected[name] = (r["meta"]["total"], [p["id"] for p in r["products"]])
@@ -122,19 +124,6 @@ def test_browser_side_filtering_and_sorting_matches_the_server(site):
     assert not mismatches, mismatches[:5]
     assert any(t for t, _ in expected.values())          # not vacuous
     assert len({tuple(ids) for _, ids in expected.values()}) > 10   # sorting actually varies
-
-
-def test_browser_side_postcode_to_state_matches_python(site):
-    if NODE is None:
-        pytest.skip("node not installed")
-    postcodes = ["0200", "0800", "0900", "1000", "2000", "2599", "2600", "2618", "2619", "2620", "2898", "2900", "2920",
-                 "2921", "3000", "3999", "4000", "5000", "6000", "6797", "6798", "6800", "7000", "8000", "9000",
-                 "0100", "abc", "123", "12345", "", "2606"]
-    cases_file = site["out"].parent / "none.json"
-    cases_file.write_text("[]")
-    run = subprocess.run([NODE, str(ROOT / "tests/js/static_parity.cjs"), str(site["out"]), str(cases_file),
-                          json.dumps(postcodes)], capture_output=True, text=True)
-    assert [state_for_postcode(p) for p in postcodes] == json.loads(run.stdout)["states"]
 
 
 # ---- real browser -----------------------------------------------------------
@@ -157,9 +146,18 @@ def test_exported_site_works_in_a_real_browser(site):
             problems = []
             page.on("console", lambda m: problems.append(m.text) if m.type in ("error", "warning") else None)
             page.on("pageerror", lambda e: problems.append(str(e)))
-            page.goto(f"{base}/?postcode=2606")
+            page.goto(f"{base}/")
+            # the dropdown lists every state/territory by name; there is no postcode box
+            page.wait_for_function("document.querySelectorAll('#state option').length === 9")
+            names = page.eval_on_selector_all("#state option", "els => els.map(e => e.textContent)")
+            assert names[0].startswith("Choose") and "New South Wales" in names                  # covered
+            assert "Northern Territory (no prices yet)" in names and "Victoria (no prices yet)" in names   # not covered
+            assert page.locator("#postcode").count() == 0
+            page.select_option("#state", "ACT")
             page.wait_for_selector(".card")
             assert "Demo data" in page.inner_text("#demo-banner")
+            assert "2600" in page.inner_text("#state-postcode")
+            assert "Australian Capital Territory" in page.inner_text("#summary")
             page.fill("#q", "carlton dry lager bottles")
             page.wait_for_function("document.querySelectorAll('.card').length === 1")
             assert "$" in page.inner_text(".card")
@@ -167,14 +165,39 @@ def test_exported_site_works_in_a_real_browser(site):
             page.wait_for_selector("#detail[open] svg circle")
             assert page.locator("#detail svg path").count() >= 1
             page.keyboard.press("Escape")
-            # a state we don't cover gives a clear message, not a blank page
-            page.fill("#postcode", "0800")
-            page.dispatch_event("#postcode-form", "submit")
-            page.wait_for_function("document.getElementById('postcode-error').textContent.includes('only has prices for')")
-            page.fill("#postcode", "12")
-            page.dispatch_event("#postcode-form", "submit")
-            assert "valid 4-digit" in page.inner_text("#postcode-error")
+            # the choice is remembered and shareable in the URL
+            assert page.evaluate("new URLSearchParams(location.search).get('state')") == "ACT"
+            page.reload()
+            page.wait_for_selector(".card")
+            assert page.input_value("#state") == "ACT"
+            # switching state changes the prices source
+            page.select_option("#state", "WA")
+            page.wait_for_function("document.getElementById('summary').textContent.includes('Western Australia')")
+            # a state with no data explains itself instead of showing a blank page
+            page.select_option("#state", "NT")
+            page.wait_for_function("document.getElementById('state-error').textContent.includes('No prices for NT yet')")
             browser.close()
         assert problems == [], problems
     finally:
         srv.shutdown()
+
+
+def test_a_state_without_its_own_data_is_not_exported_as_a_copy_of_another(tmp_path):
+    """No 4,000-file copies of NSW under every other state; the dropdown says "no prices yet"."""
+    conn = db.connect(str(tmp_path / "one.sqlite3"))
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import ingest as ingest_script
+    loc = ingest_script.bws.location_from_set_pickup(json.loads((ROOT / "tests/fixtures/bws_2606_set_pickup.json").read_text()))
+    ingest_script.ingest_files(conn, "bws", [ROOT / "tests/fixtures/bws_2606_products.json"], loc, "2026-10-01T04:00:00+00:00")
+    out = tmp_path / "site"
+    stats = export_static.export(conn, out)
+    manifest = json.loads((out / "data" / "manifest.json").read_text())
+    assert manifest["states"] == ["ACT"] == stats["states"]                      # BWS Woden is ACT
+    assert len(manifest["all_states"]) == 8                                      # but every state is still listed
+    assert not (out / "data" / "NSW").exists() and not (out / "data" / "WA").exists()
+    # inside the covered state, a retailer with no data is absent (and a notice says so), never faked
+    act = json.loads((out / "data" / "ACT" / "0-any.json").read_text())
+    assert act["locations"]["retailers"]["bws"]["store_name"] == "Woden"
+    assert act["locations"]["retailers"]["liquorland"] is None
+    assert "Liquorland prices for Australian Capital Territory" in " ".join(act["locations"]["notices"])
+    assert all(set(p["retailers"]) == {"bws"} for p in act["products"])
