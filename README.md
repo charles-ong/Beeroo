@@ -27,7 +27,13 @@ BEEROO_DB=data/demo.sqlite3 uvicorn app.main:app --reload
 
 Without `BEEROO_DB` it serves `data/beeroo.sqlite3` (real data only, history starts when you first collect). API: `GET /api/compare?postcode=2606&sort=value&pack=case&q=...`, `GET /api/products/{id}?postcode=...`, `GET /api/locations?postcode=...`. A postcode maps to a state; each retailer's prices come from a same-state location if loaded, otherwise a fallback that the UI flags.
 
-## Deployment and the scheduled Dan Murphy's run
+## Free hosting and daily scraping
+
+The default setup costs nothing: your computer scrapes BWS and Dan Murphy's daily for Sydney, Canberra, Melbourne and Perth, exports a static website, and publishes it to a free static host. See `docs/FREE_HOSTING.md`, `docs/SCHEDULED_SCRAPE.md` and `docs/LIQUORLAND_MANUAL.md` (Liquorland is refreshed by hand).
+
+## Paid server option (not needed)
+
+`docs/DEPLOYMENT.md` describes a Docker/Fly.io server. Optional. Details:
 
 See `docs/DEPLOYMENT.md` (Docker/Fly.io, backups, security checklist) and `docs/SCHEDULED_SCRAPE.md` (daily headed run on your own Mac, with block backoff). The server never scrapes; trusted data arrives via `POST /api/admin/ingest`.
 

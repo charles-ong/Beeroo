@@ -7,10 +7,7 @@
   <key>ProgramArguments</key>
   <array>
     <string>/bin/sh</string>
-    <string>@REPO@/scripts/run_scrape.sh</string>
-    <string>--push</string>
-    <string>--jitter</string>
-    <string>900</string>
+    <string>@REPO@/scripts/daily_run.sh</string>
   </array>
   <key>WorkingDirectory</key>
   <string>@REPO@</string>

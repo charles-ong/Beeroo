@@ -13,6 +13,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import backup_db  # noqa: E402
+import check_freshness  # noqa: E402
 
 from common import db  # noqa: E402
 
@@ -122,7 +123,7 @@ def test_launchd_plist_renders_and_parses():
     assert plist["StartCalendarInterval"] == {"Hour": 7, "Minute": 5}
     assert plist["RunAtLoad"] is False
     args = plist["ProgramArguments"]
-    assert args[1].endswith("scripts/run_scrape.sh") and "--push" in args and "--jitter" in args
+    assert args[1].endswith("scripts/daily_run.sh")
     assert str(ROOT) in args[1] and "@" not in r.stdout.replace("com.apple", "")
 
 
@@ -232,3 +233,131 @@ def test_push_captures_needs_server_settings(monkeypatch):
     monkeypatch.delenv("BEEROO_ADMIN_TOKEN", raising=False)
     with pytest.raises(SystemExit, match="BEEROO_SERVER"):
         push_captures.main(["liquorland", str(ROOT / "tests/fixtures/liquorland_act_products.json")])
+
+
+# ---- publish_pages.sh (against a real local git remote) ----------------------
+
+
+def git(*args, cwd=None):
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=True).stdout.strip()
+
+
+@pytest.fixture()
+def fake_site(tmp_path):
+    site = tmp_path / "site"
+    (site / "data").mkdir(parents=True)
+    (site / "index.html").write_text("<html>v1</html>")
+    (site / "data" / "manifest.json").write_text('{"states":["ACT"]}')
+    return site
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git not installed")
+def test_publish_pushes_a_single_orphan_commit_each_time(tmp_path, fake_site):
+    remote = tmp_path / "remote.git"
+    git("init", "-q", "--bare", str(remote))
+    env = {**os.environ, "BEEROO_PAGES_REMOTE": str(remote)}
+    script = str(ROOT / "scripts" / "publish_pages.sh")
+
+    def publish():
+        return subprocess.run([SH, script, str(fake_site)], capture_output=True, text=True, env=env)
+
+    r1 = publish()
+    assert r1.returncode == 0, r1.stderr
+    (fake_site / "index.html").write_text("<html>v2</html>")
+    assert publish().returncode == 0
+
+    assert git("rev-list", "--count", "gh-pages", cwd=remote) == "1"             # history never grows
+    assert git("show", "gh-pages:index.html", cwd=remote) == "<html>v2</html>"
+    assert "data/manifest.json" in git("ls-tree", "-r", "--name-only", "gh-pages", cwd=remote)
+    assert ".git/" not in git("ls-tree", "-r", "--name-only", "gh-pages", cwd=remote)
+
+
+def test_publish_refuses_without_a_remote_or_a_real_site(tmp_path, fake_site):
+    script = str(ROOT / "scripts" / "publish_pages.sh")
+    env = {k: v for k, v in os.environ.items() if k != "BEEROO_PAGES_REMOTE"}
+    r = subprocess.run([SH, script, str(fake_site)], capture_output=True, text=True, env=env)
+    assert r.returncode == 2 and "BEEROO_PAGES_REMOTE" in r.stderr
+    env["BEEROO_PAGES_REMOTE"] = str(tmp_path / "x.git")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    r = subprocess.run([SH, script, str(empty)], capture_output=True, text=True, env=env)
+    assert r.returncode == 2 and "not an exported site" in r.stderr
+
+
+# ---- daily_run.sh control flow (stub programs) -------------------------------
+
+
+@pytest.fixture()
+def daily_repo(tmp_path):
+    (tmp_path / "scripts").mkdir()
+    shutil.copy(ROOT / "scripts" / "daily_run.sh", tmp_path / "scripts" / "daily_run.sh")
+    log = tmp_path / "calls.log"
+    py = tmp_path / ".venv" / "bin" / "python"
+    py.parent.mkdir(parents=True)
+    py.write_text(f'#!/bin/sh\necho "py $*" >> "{log}"\ncase "$1" in *scheduled_scrape.py) exit "${{FAKE_SCRAPE_CODE:-0}}";; esac\nexit 0\n')
+    py.chmod(0o755)
+    pub = tmp_path / "scripts" / "publish_pages.sh"
+    pub.write_text(f'#!/bin/sh\necho "publish $*" >> "{log}"\n')
+    pub.chmod(0o755)
+    return tmp_path, log
+
+
+def run_daily(repo, extra_env=None, *args):
+    env = {"PATH": os.environ["PATH"], "HOME": str(repo), "BEEROO_ENV_FILE": str(repo / "none"), **(extra_env or {})}
+    return subprocess.run([SH, str(repo / "scripts" / "daily_run.sh"), *args], capture_output=True, text=True, env=env)
+
+
+def test_daily_run_scrapes_exports_checks_then_publishes(daily_repo):
+    repo, log = daily_repo
+    r = run_daily(repo, {"BEEROO_PAGES_REMOTE": "git@example:x/y.git", "BEEROO_ZONES_PER_RUN": "2"})
+    assert r.returncode == 0, r.stderr
+    calls = log.read_text().splitlines()
+    assert [c.split()[1].split("/")[-1] for c in calls if c.startswith("py")] == ["scheduled_scrape.py", "export_static.py", "check_freshness.py"]
+    assert "--zones-per-run 2" in calls[0] and calls[-1] == "publish site"
+
+
+def test_daily_run_without_a_remote_exports_but_does_not_publish(daily_repo):
+    repo, log = daily_repo
+    r = run_daily(repo)
+    assert r.returncode == 0 and "not published" in r.stdout
+    assert not any(c.startswith("publish") for c in log.read_text().splitlines())
+
+
+def test_daily_run_still_exports_after_a_block_and_reports_it(daily_repo):
+    repo, log = daily_repo
+    r = run_daily(repo, {"FAKE_SCRAPE_CODE": "3", "BEEROO_PAGES_REMOTE": "x"})
+    calls = log.read_text()
+    assert r.returncode == 3                                     # blocked is still reported to launchd
+    assert "export_static.py" in calls and "publish site" in calls   # but yesterday's data is still published
+
+
+def test_daily_run_refuses_a_world_readable_env_file(daily_repo):
+    repo, _ = daily_repo
+    env_file = repo / "env"
+    env_file.write_text("BEEROO_PAGES_REMOTE=x\n")
+    env_file.chmod(0o644)
+    r = run_daily(repo, {"BEEROO_ENV_FILE": str(env_file)})
+    assert r.returncode == 1 and "chmod 600" in r.stderr
+
+
+# ---- freshness --------------------------------------------------------------
+
+
+def test_freshness_report(tmp_path):
+    import check_freshness
+    conn = db.connect(str(tmp_path / "f.sqlite3"))
+    now = datetime(2026, 10, 10, tzinfo=timezone.utc)
+    rows = [("bws", "bws:6723", "ACT", "2026-10-09T00:00:00+00:00"),
+            ("bws", "bws:9", "WA", "2026-10-01T00:00:00+00:00"),
+            ("liquorland", "liquorland:ll_act", "ACT", "2026-10-02T00:00:00+00:00")]
+    for i, (retailer, key, state, ts) in enumerate(rows):
+        conn.execute("INSERT INTO locations (location_key, retailer, state) VALUES (?, ?, ?)", (key, retailer, state))
+        conn.execute("INSERT INTO listings (retailer, retailer_sku, url, name, first_seen, last_seen) VALUES (?, ?, 'u', 'n', 'x', 'x')", (retailer, str(i)))
+        conn.execute("INSERT INTO price_observations (listing_id, location_key, pack_type, units, member_only, price, observed_at) VALUES (?, ?, 'single', 1, 0, 5, ?)", (i + 1, key, ts))
+    conn.commit()
+    got = {(c, r): (s, a) for c, r, s, a in check_freshness.freshness(conn, now=now, max_age_days=3)}
+    assert got[("Canberra (ACT)", "bws")] == ("ok", 1.0)
+    assert got[("Perth (WA)", "bws")][0] == "STALE"
+    assert got[("Canberra (ACT)", "liquorland")][0] == "STALE"
+    assert got[("Sydney (NSW)", "dan_murphys")] == ("MISSING", None)
+    assert len(got) == 12                                                      # 4 cities x 3 retailers

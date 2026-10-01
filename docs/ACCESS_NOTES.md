@@ -42,3 +42,16 @@ Captured in a normal browser, logged out, locations 2606 (ACT) and 6000 (WA). Ra
 
 ### Blocking issue: Liquorland robots.txt
 Liquorland's `robots.txt` has `Disallow: /api/*` and its category HTML is client-rendered (no product data), so the data can only be fetched from disallowed URLs, and ABV would need one extra disallowed request per product. Combined with the ShieldSquare CAPTCHA, **an automated Liquorland scraper would break our own ground rules.** The parsers are written for manually captured data only. Options: manual/periodic captures, ask Coles Group for a feed, or exclude Liquorland ABV/standard-drink from the MVP (compute from names where present).
+
+## BWS live findings (2026-10-01, from a visible-browser run, Canberra 2600)
+
+- `robots.txt` (fetched in-browser, HTTP 200) disallows only `/search`, `/my-profile`, `/my-account/order-history`, `/my-account/my-profile`, `/checkout`, `/customer-reviews`, `/Akamai`. Category pages are allowed. Not blocked by bot protection.
+- Full beer list: `https://bws.com.au/beer/all-beer` (745 beers; 40 per page via a **"LOAD MORE" link**, not a button). Each load calls `GET /apis/ui/Browse?...&pageNumber=N&pageSize=40`, whose response carries `Bundles` (same shape as ProductGroup `Items`). Store: modal "Set Your Store" -> "Enter postcode or suburb" -> suggestion -> **SELECT** on a store -> `POST /apis/ui/Address/SetPickupByStoreNo`.
+- A store stocks only ~200-300 of the 745 (`IsAvailable`/`StockOnHand` per store); the rest are skipped as out of stock.
+- **Data quirks found only with real data (all fixed + tested in `tests/test_bws_live.py`):**
+  - `liquorsize` is unreliable: across an item's products it can hold the *largest pack's* volume (6000ML on a single can, a 4-pack and a 16-case alike). Per-unit volume comes from the product **name**.
+  - Some products are sold as "N Pack" with `productunitquantity` 1: the name states N.
+  - Names like "Cans 10x375ml": the unit is a 10-pack, so units = 10 x quantity (quantity 3 "Case" = 30 cans).
+  - A `webpacktype: Case` with quantity 1 and no count: count = `liquorsize` / per-can volume only if a clean whole number, else skipped.
+  - Multi-buy tags ("2 for $120") are sometimes stamped onto the single can as well as the carton; kept only if cheaper than buying separately.
+- Result on the real capture: 204 in-stock products, ABV on 203, $/standard drink range $1.10-$10.97 for beers over 2% ABV.

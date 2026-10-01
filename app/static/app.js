@@ -6,7 +6,7 @@ const RETAILERS = [
 ];
 const PAGE = 40;
 const $ = (id) => document.getElementById(id);
-const state = { postcode: "", offset: 0, lastQuery: "" };
+const state_ = { postcode: "", offset: 0, lastQuery: "" };
 
 // ---- tiny safe DOM builder (text only; never builds HTML strings) ----------
 function h(tag, attrs, ...kids) {
@@ -34,6 +34,43 @@ function ago(iso) {
 function store(key) { try { return localStorage.getItem(key); } catch { return null; } }
 function save(key, val) { try { localStorage.setItem(key, val); } catch { /* ignore */ } }
 
+// ---- Data source: live API (server) or static files (free hosting) -----------
+const STATIC_MODE = (document.querySelector('meta[name="beeroo-mode"]') || {}).content === "static";
+const jsonCache = new Map();
+async function loadJson(path) {
+  if (!jsonCache.has(path)) {
+    jsonCache.set(path, fetch(path).then((r) => {
+      if (!r.ok) throw new Error(r.status === 404 ? "That data isn't available." : "Couldn't load data. Please try again.");
+      return r.json();
+    }));
+  }
+  try { return await jsonCache.get(path); } catch (e) { jsonCache.delete(path); throw e; }
+}
+async function staticState(postcode) {
+  const S = window.BeerooStatic;
+  const state = S.stateForPostcode(postcode);
+  if (!state) throw new Error("Enter a valid 4-digit Australian postcode.");
+  const manifest = await loadJson("data/manifest.json");
+  if (!manifest.states.includes(state)) {
+    throw new Error(`This version only has prices for ${manifest.states.join(", ")}. Try a postcode in one of those states.`);
+  }
+  return state;
+}
+async function staticCompare(p, limit, offset) {
+  const S = window.BeerooStatic;
+  const state = await staticState(p.postcode);
+  const payload = await loadJson(S.variantPath(state, p.include_member, p.pack));
+  return S.applyQuery(payload, {
+    q: p.q, sort: p.sort, limit, offset,
+    min_abv: p.min_abv === "" ? null : p.min_abv, max_abv: p.max_abv === "" ? null : p.max_abv,
+    min_retailers: p.min_retailers || 1,
+  });
+}
+async function staticDetail(id) {
+  const state = await staticState(state_.postcode);
+  return loadJson(window.BeerooStatic.detailPath(state, id));
+}
+
 // ---- API --------------------------------------------------------------------
 async function api(path, params) {
   const qs = new URLSearchParams();
@@ -48,7 +85,7 @@ async function api(path, params) {
 }
 function filterParams() {
   return {
-    postcode: state.postcode, q: $("q").value.trim(), sort: $("sort").value, pack: $("pack").value,
+    postcode: state_.postcode, q: $("q").value.trim(), sort: $("sort").value, pack: $("pack").value,
     min_abv: $("min_abv").value, max_abv: $("max_abv").value,
     include_member: $("include_member").checked, min_retailers: $("multi").checked ? 2 : "",
   };
@@ -104,10 +141,12 @@ function renderLocations(loc) {
 }
 
 async function search(append) {
-  if (!state.postcode) return;
-  if (!append) state.offset = 0;
+  if (!state_.postcode) return;
+  if (!append) state_.offset = 0;
   try {
-    const data = await api("/api/compare", { ...filterParams(), limit: PAGE, offset: state.offset });
+    const data = STATIC_MODE
+      ? await staticCompare(filterParams(), PAGE, state_.offset)
+      : await api("/api/compare", { ...filterParams(), limit: PAGE, offset: state_.offset });
     $("demo-banner").hidden = !data.meta.demo;
     renderLocations(data.locations);
     $("filters").hidden = false;
@@ -117,12 +156,12 @@ async function search(append) {
       list.append(h("div", { class: "empty-state" }, "No products match these filters for this postcode. Try clearing some filters."));
     }
     data.products.forEach((p) => list.append(card(p)));
-    state.offset += data.products.length;
-    $("more").hidden = state.offset >= data.meta.total;
-    $("summary").textContent = `${data.meta.total} product${data.meta.total === 1 ? "" : "s"} · postcode ${state.postcode} (${data.locations.state})`
+    state_.offset += data.products.length;
+    $("more").hidden = state_.offset >= data.meta.total;
+    $("summary").textContent = `${data.meta.total} product${data.meta.total === 1 ? "" : "s"} · postcode ${state_.postcode} (${data.locations.state})`
       + (data.meta.latest_data ? " · latest data " + ago(data.meta.latest_data) : "");
     const url = new URL(location.href);
-    url.search = new URLSearchParams({ postcode: state.postcode }).toString();
+    url.search = new URLSearchParams({ postcode: state_.postcode }).toString();
     history.replaceState(null, "", url);
   } catch (e) {
     showPostcodeError(e.message);
@@ -216,7 +255,7 @@ function detailBody(d) {
 }
 async function openDetail(id) {
   try {
-    const d = await api("/api/products/" + id, { postcode: state.postcode });
+    const d = STATIC_MODE ? await staticDetail(id) : await api("/api/products/" + id, { postcode: state_.postcode });
     $("detail-body").replaceChildren(detailBody(d));
     $("detail").showModal();
   } catch (e) { alert(e.message); }
@@ -232,7 +271,7 @@ function submitPostcode(e) {
   const pc = $("postcode").value.trim();
   if (!/^\d{4}$/.test(pc)) return showPostcodeError("Enter a valid 4-digit Australian postcode.");
   showPostcodeError("");
-  state.postcode = pc; save("beeroo.postcode", pc);
+  state_.postcode = pc; save("beeroo.postcode", pc);
   search(false);
 }
 $("postcode-form").addEventListener("submit", submitPostcode);

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Install (or remove) the daily scrape as a macOS LaunchAgent.
+# Install (or remove) the daily job (scrape -> export -> publish) as a macOS LaunchAgent.
 #
 #   scripts/install_launchd.sh --print                 # show the plist, change nothing
 #   scripts/install_launchd.sh [--hour 11 --minute 30] # install + load

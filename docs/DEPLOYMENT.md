@@ -1,4 +1,6 @@
-# Deployment
+# Deployment (optional, paid server)
+
+> **You don't need this.** The default, free setup is `docs/FREE_HOSTING.md` (static site published from your own computer). Use this document only if you later want a live API, public crowd contributions, or any-state coverage, and are willing to pay for a small always-on server.
 
 ## Architecture
 

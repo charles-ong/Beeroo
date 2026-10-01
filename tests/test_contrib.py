@@ -339,3 +339,31 @@ def test_new_installs_dont_vote_when_min_age_is_set(client, conn, monkeypatch):
     conn.commit()
     contrib.promote(conn)
     assert observed(conn) == [58.0]
+
+
+# ---- single-user mode (BEEROO_QUORUM=1) -------------------------------------
+
+
+def test_single_user_mode_accepts_one_contributor(client, conn, monkeypatch):
+    monkeypatch.setenv("BEEROO_QUORUM", "1")
+    r = client.post("/api/contrib", json=body(1, BWS))
+    assert r.status_code == 202 and r.json()["promoted"] > 40
+    assert observed(conn) == [58.0]
+
+
+def test_single_user_mode_accepts_large_price_changes(client, conn, monkeypatch):
+    monkeypatch.setenv("BEEROO_QUORUM", "1")
+    client.post("/api/contrib", json=body(1, BWS))
+    client.post("/api/contrib", json=body(1, with_price(BWS, 809797, 24, 20.0)))   # -66%
+    assert observed(conn) == [58.0, 20.0]
+
+
+def test_default_quorum_is_unchanged_and_bad_values_fall_back(client, conn, monkeypatch):
+    assert contrib.quorum() == 2
+    monkeypatch.setenv("BEEROO_QUORUM", "banana")
+    assert contrib.quorum() == 2
+    monkeypatch.setenv("BEEROO_QUORUM", "0")
+    assert contrib.quorum() == 1                                                    # never below 1
+    monkeypatch.setenv("BEEROO_QUORUM", "2")
+    client.post("/api/contrib", json=body(1, BWS))
+    assert observed(conn) == []

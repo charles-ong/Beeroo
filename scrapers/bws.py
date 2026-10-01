@@ -32,12 +32,62 @@ def _clean(text):
     return re.sub(r"\s+", " ", (text or "").replace("<br>", " ")).strip()
 
 
+def _name_volume(product):
+    """Per-unit volume as the product NAME states it ("... Cans 375ml")."""
+    return parse_volume_ml(_clean(product.get("Name")))
+
+
+_PACK_IN_NAME = re.compile(r"\b(\d{1,3})\s*pack\b", re.IGNORECASE)
+_COUNT_X_VOLUME = re.compile(r"\b(\d{1,3})\s*x\s*\d+(?:\.\d+)?\s*(?:ml|l)\b", re.IGNORECASE)
+MAX_UNITS = 60
+
+
 def _units(product):
-    value = _details(product).get("productunitquantity")
+    """Units in this product, or None when it can't be determined safely.
+
+    `productunitquantity` is reliable for the standard single / pack / case
+    products. Exceptions seen in real data (quantity "1"):
+      * sold as "N Pack": the name states N ("Magners ... 10 Pack Cans 330ml").
+      * a CASE ("webpacktype": "Case") with no count in the name: the count is
+        liquorsize / per-can volume (30 x 375 mL = 11250 mL) *if* that is a clean
+        whole number; otherwise we don't know, so the price is skipped.
+
+    NOT used otherwise: `liquorsize`. Across an item's products it can hold the
+    largest pack's volume (6000ML on the single can, the 4-pack and the 16-case
+    alike), so for ordinary products it says nothing.
+    """
+    details = _details(product)
     try:
-        return max(int(value), 1)
+        units = max(int(details.get("productunitquantity")), 1)
     except (TypeError, ValueError):
-        return 1
+        units = 1
+
+    name = _clean(product.get("Name"))
+
+    # "...Cans 10x375ml": the product's unit is a 10-pack, so quantity 1 = 10 cans
+    # and quantity 3 = three 10-packs = 30 cans (verified on 8 real products).
+    count = _COUNT_X_VOLUME.search(name)
+    if count and int(count.group(1)) >= 2:
+        total = int(count.group(1)) * units
+        return total if total <= MAX_UNITS else None
+
+    if units > 1:
+        return units
+
+    match = _PACK_IN_NAME.search(name)
+    if match and int(match.group(1)) >= 2:
+        return int(match.group(1))
+
+    if str(details.get("webpacktype") or "").lower() in ("case", "carton"):
+        unit_ml = _name_volume(product)
+        size_ml = parse_volume_ml(str(details.get("liquorsize") or ""))
+        if unit_ml and size_ml:
+            ratio = size_ml / unit_ml
+            if ratio >= 4 and abs(ratio - round(ratio)) < 0.02:
+                return int(round(ratio))
+        return None   # a case of unknown size: don't guess
+
+    return 1
 
 
 def _pack_type(units, base_units):
@@ -51,9 +101,12 @@ def parse_item_prices(products, location_key, observed_at):
 
     - Price: standard shelf price.
     - "AppBasedOffer" FixedPricePromo ("on app for"): per-pack app price,
-      flagged member_only.
+      flagged member_only. Ignored unless it is actually cheaper.
     - "N for" FixedPricePromo: total price for N packs (public multi-buy).
-    Unavailable products are skipped.
+      BWS sometimes stamps a carton deal onto the single can too ("2 for $120"
+      on a $5.50 can), so a multi-buy is only kept if it beats buying the
+      packs separately.
+    Unavailable products, and products whose unit count is unknown, are skipped.
     """
     observations = []
 
@@ -62,6 +115,9 @@ def parse_item_prices(products, location_key, observed_at):
             continue
 
         units = _units(product)
+        if units is None:
+            continue
+
         price = product.get("Price")
 
         if price:
@@ -84,6 +140,8 @@ def parse_item_prices(products, location_key, observed_at):
         multiplier = tag.get("ProductMultiplier") or 0
 
         if product.get("PromotionType") == "AppBasedOffer":
+            if price and promo >= price:
+                continue  # not actually an offer
             observations.append(
                 PriceObservation(
                     pack_type=_pack_type(units, units),
@@ -95,6 +153,8 @@ def parse_item_prices(products, location_key, observed_at):
                 )
             )
         elif multiplier > 1:
+            if price and promo >= multiplier * price:
+                continue  # no saving: the tag belongs to a different pack
             total_units = multiplier * units
             observations.append(
                 PriceObservation(
@@ -126,7 +186,8 @@ def parse_item(item, location_key, observed_at):
     details = _details(base)
 
     abv = parse_abv(str(details.get("alcohol%") or ""))
-    volume = parse_volume_ml(
+    # The name states the per-unit volume; liquorsize is unreliable (see _units).
+    volume = _name_volume(base) or parse_volume_ml(
         str(details.get("liquorsize") or base.get("PackageSize") or "")
     )
 
@@ -189,3 +250,38 @@ def location_from_set_pickup(payload):
         state=details.get("AddressState"),
         postcode=details.get("AddressPostalCode"),
     )
+
+
+_KEEP_PRODUCT = ("Stockcode", "Price", "Name", "UrlFriendlyName", "IsAvailable", "PackageSize", "BrandName", "PromotionType")
+_KEEP_DETAILS = {"productunitquantity", "alcohol%", "liquorsize", "brand_name", "webpacktype"}
+
+
+def minimal_payload(payload, only_available=True):
+    """The smallest payload the parser needs: in-stock items only (a store lists
+    ~745 beers but stocks ~200), allowlisted fields only. A full capture is
+    ~12 MB; this is well under 1 MB and parses identically."""
+    items = []
+    for item in payload.get("Items") or []:
+        products = item.get("Products") or []
+        if only_available and not any(p.get("IsAvailable") for p in products):
+            continue
+        items.append({
+            "PackParentStockCode": item.get("PackParentStockCode"),
+            "Name": item.get("Name"),
+            "Products": [
+                {
+                    **{k: p[k] for k in _KEEP_PRODUCT if k in p},
+                    "FixedPricePromoTag": {
+                        k: (p.get("FixedPricePromoTag") or {}).get(k)
+                        for k in ("PromotionalPrice", "ProductMultiplier")
+                    },
+                    "AdditionalDetails": [
+                        {"Name": d["Name"], "Value": d.get("Value")}
+                        for d in p.get("AdditionalDetails") or []
+                        if d.get("Name") in _KEEP_DETAILS
+                    ],
+                }
+                for p in products
+            ],
+        })
+    return {"TotalRecordCount": payload.get("TotalRecordCount"), "Items": items}

@@ -11,7 +11,7 @@ const pick = (obj, keys) => {
 };
 
 const DM_DETAILS = new Set(["webbrandname", "webtitle", "webalcoholpercentage", "webliquorsize", "webproducttype"]);
-const BWS_DETAILS = new Set(["productunitquantity", "alcohol%", "liquorsize", "brand_name"]);
+const BWS_DETAILS = new Set(["productunitquantity", "alcohol%", "liquorsize", "brand_name", "webpacktype"]);
 
 function details(list, allowed) {
   return (Array.isArray(list) ? list : [])

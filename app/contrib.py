@@ -27,7 +27,8 @@ from scrapers import bws, endeavour, liquorland
 MAX_BODY_BYTES = 3_000_000
 MAX_PRODUCTS = 600
 MAX_PER_HOUR = 30
-QUORUM = 2                 # independent installs that must agree to the cent
+QUORUM = 2                 # default: independent installs that must agree to the cent
+                           # (BEEROO_QUORUM=1 = single-user mode for your own local copy)
 WINDOW = timedelta(hours=24)
 EXPIRY = timedelta(hours=72)
 SINGLE_MIN_ACCEPTED = 10   # a lone contributor needs this track record...
@@ -267,6 +268,13 @@ def _last_accepted_price(conn, retailer, key):
     return row["price"] if row else None
 
 
+def quorum():
+    try:
+        return max(1, int(os.environ.get("BEEROO_QUORUM", QUORUM)))
+    except ValueError:
+        return QUORUM
+
+
 def _min_install_age():
     return timedelta(hours=float(os.environ.get("BEEROO_MIN_INSTALL_AGE_HOURS", "0")))
 
@@ -291,13 +299,15 @@ def _decide(conn, key, rows, now=None):
 
     ranked = sorted(by_price.items(), key=lambda kv: -len(kv[1]))
 
-    if ranked and len(ranked[0][1]) >= QUORUM:
+    need = quorum()
+    if ranked and len(ranked[0][1]) >= need:
         if len(ranked) > 1 and len(ranked[1][1]) == len(ranked[0][1]):
             return None  # ambiguous: two equally supported prices
         price, winners = ranked[0]
         last = _last_accepted_price(conn, key[0], key)
-        if last and abs(price - last) / last > LARGE_MOVE and len(winners) < QUORUM + 1:
-            return None  # big swings need extra confirmation
+        # big swings need extra confirmation (not in single-user mode: you ARE the source)
+        if need >= 2 and last and abs(price - last) / last > LARGE_MOVE and len(winners) < need + 1:
+            return None
         outliers = [r for p, rs in ranked[1:] for r in rs]
         return price, winners, outliers
 
