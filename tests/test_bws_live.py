@@ -278,3 +278,70 @@ def test_implausibly_large_counts_are_skipped():
     item = {"PackParentStockCode": 1, "Name": "n", "Products": [_product("Bulk Lager 24x330ml", 99.0, "3", "330ML", packtype="Case")]}
     out, errs = bws.parse_bws_payload({"Items": [item]}, "k", NOW)
     assert out == [] and errs                                     # 24 x 3 = 72 > 60: don't guess
+
+
+# ---- "N Pack" items: the item's sibling products decide (real data, 2026-10-01) -------
+
+
+def units_and_prices(*products):
+    p = parse_one(*products)
+    return sorted((o.units, o.price) for o in p.prices if not o.member_only)
+
+
+def test_kopparberg_single_can_is_not_mistaken_for_a_ten_pack():
+    # Reported edge case: the can is $5 and the 10 pack is $25. All three share the name "...10 Pack Cans 330ml".
+    name = "Kopparberg Hard Apple Cider 10 Pack Cans 330ml"
+    got = units_and_prices(
+        _product(name, 25.0, "10", "330ML", packtype="Pack", stock=975730),
+        _product(name, 5.0, "1", "330ML", packtype="Can", stock=120842),
+        _product(name, 49.0, "20", "330ML", packtype="Case", stock=975731),
+    )
+    assert got == [(1, 5.0), (10, 25.0), (20, 49.0)]
+    p = parse_one(
+        _product(name, 25.0, "10", "330ML", packtype="Pack"), _product(name, 5.0, "1", "330ML", packtype="Can", stock=2))
+    assert {o.units: o.pack_type.value for o in p.prices} == {1: "single", 10: "pack"}
+    assert pps(p, next(o for o in p.prices if o.units == 1)) == pytest.approx(5.0 / (0.33 * 4.5 * 0.789), rel=1e-6)
+
+
+def test_order_of_the_products_does_not_matter():
+    name = "Kopparberg Hard Apple Cider 10 Pack Cans 330ml"
+    items = [_product(name, 25.0, "10", "330ML", packtype="Pack", stock=1),
+             _product(name, 5.0, "1", "330ML", packtype="Can", stock=2),
+             _product(name, 49.0, "20", "330ML", packtype="Case", stock=3)]
+    assert units_and_prices(*items) == units_and_prices(*reversed(items)) == [(1, 5.0), (10, 25.0), (20, 49.0)]
+
+
+def test_magners_only_product_is_still_the_ten_pack():
+    assert units_and_prices(_product("Magners Original Irish Cider 10 Pack Cans 330ml", 32.0, "1", "3300ML", packtype="Can")) == [(10, 32.0)]
+
+
+def test_mercury_quantities_count_packs():
+    name = "Mercury Hard Cider 10 Pack Cans 375ml"
+    assert units_and_prices(_product(name, 31.0, "1", "375ML", packtype="Pack", stock=1),
+                            _product(name, 98.0, "3", "375ML", packtype="Case", stock=2)) == [(10, 31.0), (30, 98.0)]
+
+
+def test_mountain_culture_pack_with_a_can_counted_case():
+    name = "Mountain Culture Status Quo Pale Ale 10 Pack Cans 355ml"
+    assert units_and_prices(_product(name, 53.0, "1", "355ML", packtype="Pack", stock=1),
+                            _product(name, 160.0, "30", "355ML", packtype="Case", stock=2)) == [(10, 53.0), (30, 160.0)]
+
+
+def test_x_volume_names_still_work_with_and_without_a_can_counted_sibling():
+    name = "Somersby Pear Cider Cans 10x375ml"
+    assert units_and_prices(_product(name, 25.0, "1", "375ML", packtype="Can", stock=1),
+                            _product(name, 90.0, "3", "375ML", packtype="Case", stock=2)) == [(10, 25.0), (30, 90.0)]
+    # same name, but the item carries an explicit qty-10 product: then qty 1 is a single can
+    assert units_and_prices(_product(name, 3.0, "1", "375ML", stock=1),
+                            _product(name, 25.0, "10", "375ML", packtype="Pack", stock=2)) == [(1, 3.0), (10, 25.0)]
+
+
+def test_kopparberg_when_only_the_single_can_is_in_stock():
+    """The reported case in NSW: the 10 and 20 packs are out of stock (but still listed), the can is $5."""
+    name = "Kopparberg Hard Apple Cider 10 Pack Cans 330ml"
+    ten = _product(name, 25.0, "10", "330ML", packtype="Pack", stock=975730)
+    can = _product(name, 5.0, "1", "330ML", packtype="Can", stock=120842)
+    twenty = _product(name, 49.0, "20", "330ML", packtype="Case", stock=975731)
+    ten["IsAvailable"] = twenty["IsAvailable"] = False
+    p = parse_one(ten, can, twenty)
+    assert [(o.units, o.pack_type.value, o.price) for o in p.prices] == [(1, "single", 5.0)]     # not "10 for $5"

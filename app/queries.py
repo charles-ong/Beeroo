@@ -107,9 +107,16 @@ FROM (
     FROM price_observations
     WHERE location_key = ?
 ) o
+JOIN (
+    -- the day each listing was last seen at this location
+    SELECT listing_id, MAX(date(observed_at)) AS last_day
+    FROM price_observations WHERE location_key = ? GROUP BY listing_id
+) seen ON seen.listing_id = o.listing_id
 JOIN listings l ON l.id = o.listing_id
 LEFT JOIN products p ON p.id = l.product_id
-WHERE o.rn = 1 AND l.retailer = ?
+-- A pack/price that was NOT re-observed on the listing's latest scrape day has
+-- gone (out of stock, or a parsing rule changed): don't show it as current.
+WHERE o.rn = 1 AND l.retailer = ? AND date(o.observed_at) = seen.last_day
 """
 
 
@@ -146,7 +153,7 @@ def load_products(conn, locations, include_member=False, pack_type=None, now=Non
         if not loc:
             continue
 
-        for row in conn.execute(_LATEST_OPTIONS_SQL, (loc["location_key"], retailer)):
+        for row in conn.execute(_LATEST_OPTIONS_SQL, (loc["location_key"], loc["location_key"], retailer)):
             if row["product_id"] is None:
                 continue
             if row["member_only"] and not include_member:

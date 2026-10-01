@@ -43,45 +43,62 @@ _COUNT_X_VOLUME = re.compile(r"\b(\d{1,3})\s*x\s*\d+(?:\.\d+)?\s*(?:ml|l)\b", re
 MAX_UNITS = 60
 
 
-def _units(product):
+def _quantity(product):
+    try:
+        return max(int(_details(product).get("productunitquantity")), 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def _pack_size_in_name(name):
+    """N from "...10 Pack Cans..." or "...Cans 10x375ml", else None."""
+    for pattern in (_COUNT_X_VOLUME, _PACK_IN_NAME):
+        match = pattern.search(name)
+        if match and int(match.group(1)) >= 2:
+            return int(match.group(1))
+    return None
+
+
+def _units(product, siblings=()):
     """Units in this product, or None when it can't be determined safely.
 
-    `productunitquantity` is reliable for the standard single / pack / case
-    products. Exceptions seen in real data (quantity "1"):
-      * sold as "N Pack": the name states N ("Magners ... 10 Pack Cans 330ml").
-      * a CASE ("webpacktype": "Case") with no count in the name: the count is
-        liquorsize / per-can volume (30 x 375 mL = 11250 mL) *if* that is a clean
-        whole number; otherwise we don't know, so the price is skipped.
+    `productunitquantity` (qty) is what BWS provides, but for items whose NAME
+    says "N Pack" / "Nx375ml" it means different things in different items, so
+    the item's other products decide (all verified on real data):
 
-    NOT used otherwise: `liquorsize`. Across an item's products it can hold the
-    largest pack's volume (6000ML on the single can, the 4-pack and the 16-case
-    alike), so for ordinary products it says nothing.
+      * A sibling with qty == N is the explicit N-pack, so a qty-1 product is a
+        genuine single can: Kopparberg Hard Apple Cider "10 Pack": qty 1 $5,
+        qty 10 $25, qty 20 $49  ->  1, 10, 20 units.
+      * No such sibling: qty 1 IS the N-pack (Magners 10 Pack: only product,
+        qty 1, $32).
+      * qty < N can't be a count of cans in an N-pack, so it counts packs
+        (Mercury 10 Pack: qty 1 $31, qty 3 $98 -> 10 and 30 units).
+      * qty >= N is already a can count (use as is).
+
+    For a CASE (`webpacktype`) with qty 1 and no N in the name, the count is
+    liquorsize / per-can volume if that is a clean whole number, else unknown
+    (skipped, not guessed). `liquorsize` is otherwise NOT used: across an item's
+    products it can hold the largest pack's volume.
     """
-    details = _details(product)
-    try:
-        units = max(int(details.get("productunitquantity")), 1)
-    except (TypeError, ValueError):
-        units = 1
-
+    qty = _quantity(product)
     name = _clean(product.get("Name"))
+    n = _pack_size_in_name(name)
 
-    # "...Cans 10x375ml": the product's unit is a 10-pack, so quantity 1 = 10 cans
-    # and quantity 3 = three 10-packs = 30 cans (verified on 8 real products).
-    count = _COUNT_X_VOLUME.search(name)
-    if count and int(count.group(1)) >= 2:
-        total = int(count.group(1)) * units
-        return total if total <= MAX_UNITS else None
+    if n:
+        if qty == 1:
+            others = {_quantity(p) for p in siblings if p is not product}
+            return 1 if n in others else n
+        if qty < n:
+            total = qty * n
+            return total if total <= MAX_UNITS else None
+        return qty
 
-    if units > 1:
-        return units
+    if qty > 1:
+        return qty
 
-    match = _PACK_IN_NAME.search(name)
-    if match and int(match.group(1)) >= 2:
-        return int(match.group(1))
-
-    if str(details.get("webpacktype") or "").lower() in ("case", "carton"):
+    if str(_details(product).get("webpacktype") or "").lower() in ("case", "carton"):
         unit_ml = _name_volume(product)
-        size_ml = parse_volume_ml(str(details.get("liquorsize") or ""))
+        size_ml = parse_volume_ml(str(_details(product).get("liquorsize") or ""))
         if unit_ml and size_ml:
             ratio = size_ml / unit_ml
             if ratio >= 4 and abs(ratio - round(ratio)) < 0.02:
@@ -113,7 +130,7 @@ def parse_item_prices(products, location_key, observed_at):
         if not product.get("IsAvailable"):
             continue
 
-        units = _units(product)
+        units = _units(product, products)
         if units is None:
             continue
 
@@ -181,7 +198,7 @@ def parse_item(item, location_key, observed_at):
         raise ValueError("item has no products")
 
     parent = str(item["PackParentStockCode"])
-    base = next((p for p in products if _units(p) == 1), products[0])
+    base = next((p for p in products if _units(p, products) == 1), products[0])
     details = _details(base)
 
     abv = parse_abv(str(details.get("alcohol%") or ""))

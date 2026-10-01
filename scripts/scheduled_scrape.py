@@ -285,15 +285,56 @@ def run(*, state_path, scrapes, push, now=None, retailers=None, zones_per_run=le
     return code, {"results": results}
 
 
+class NoBrowser(RuntimeError):
+    pass
+
+
+def discover_chromium(cache_root=None):
+    """Newest Chromium already installed in Playwright's cache, or None.
+
+    Playwright pins a browser build per release; if that exact build isn't
+    installed but another is, using it is far better than failing every night.
+    """
+    import re
+    roots = [Path(cache_root)] if cache_root else [Path.home() / "Library/Caches/ms-playwright", Path.home() / ".cache/ms-playwright"]
+    found = []
+    for root in roots:
+        for d in root.glob("chromium-*"):
+            rev = re.fullmatch(r"chromium-(\d+)", d.name)
+            if not rev:
+                continue
+            for exe in (list(d.glob("chrome-mac*/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"))
+                        + list(d.glob("chrome-linux*/chrome"))):
+                if exe.exists():
+                    found.append((int(rev.group(1)), str(exe)))
+    return max(found)[1] if found else None
+
+
+def resolve_browser_path(explicit, expected, cache_root=None):
+    """explicit (env/flag) > Playwright's own build > newest cached Chromium."""
+    if explicit:
+        if not Path(explicit).exists():
+            raise NoBrowser(f"BEEROO_CHROMIUM_PATH does not exist: {explicit}")
+        return explicit
+    if expected and Path(expected).exists():
+        return None            # let Playwright use its own build
+    found = discover_chromium(cache_root)
+    if found is None:
+        raise NoBrowser("no Chromium found: run `playwright install chromium` or set BEEROO_CHROMIUM_PATH")
+    return found
+
+
 def browser_scrape(driver_scrape, browser_path=None):
-    """Wrap a driver (dan_murphys.scrape / bws_live.scrape) in a visible browser."""
+    """Wrap a driver (dan_murphys.scrape / bws_live.scrape / ...) in a visible browser."""
     async def scrape(postcode, max_pages):
         from playwright.async_api import async_playwright
 
         raw = []
         async with async_playwright() as p:
+            path = resolve_browser_path(browser_path, p.chromium.executable_path)
+            log.info("browser: %s", path or "playwright default")
             # Headed: headless is blocked by Dan Murphy's and is a worse citizen anyway.
-            browser = await p.chromium.launch(headless=False, executable_path=browser_path)
+            browser = await p.chromium.launch(headless=False, executable_path=path)
             try:
                 context = await browser.new_context(
                     viewport={"width": 1440, "height": 900}, locale="en-AU", timezone_id="Australia/Sydney",

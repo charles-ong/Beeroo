@@ -245,3 +245,51 @@ def test_latest_price_is_by_observation_time_not_insert_order(tmp_path):
     prices = {o["price"] for p in data["products"] for e in p["retailers"].values() for o in e["options"]}
     assert row["price"] + 50 not in prices
     assert not any(e["stale"] for p in data["products"] for e in p["retailers"].values())
+
+
+# ---- a pack that stops appearing must stop being shown ---------------------------
+
+
+def test_a_series_not_seen_on_the_listings_latest_scrape_day_is_hidden(tmp_path):
+    from common.records import Listing, PackType, PriceObservation, Retailer, ScrapedProduct
+    conn = db.connect(str(tmp_path / "stale.sqlite3"))
+    listing = Listing(retailer=Retailer.BWS, retailer_sku="1", url="https://bws.com.au/p/1", name="Test Lager Cans 375ml", abv=4.5)
+    other = Listing(retailer=Retailer.BWS, retailer_sku="2", url="https://bws.com.au/p/2", name="Other Lager Cans 375ml", abv=4.5)
+    loc = ingest.bws.location_from_set_pickup(json.loads((F / "bws_2606_set_pickup.json").read_text()))
+    db.upsert_location(conn, loc)
+    day1 = datetime(2026, 10, 1, 4, tzinfo=timezone.utc)
+    day2 = day1 + timedelta(days=1)
+
+    def obs(pack, units, price, when):
+        return PriceObservation(pack_type=pack, units=units, price=price, location_key=loc.location_key, observed_at=when)
+
+    # day 1: the wrongly-parsed "10 for $5" and the right single/pack; day 2: parser fixed, only right rows
+    db.save_products(conn, [ScrapedProduct(listing=listing, prices=[
+        obs(PackType.PACK, 10, 5.0, day1), obs(PackType.SINGLE, 1, 5.0, day1)])], day1)
+    db.save_products(conn, [ScrapedProduct(listing=listing, prices=[
+        obs(PackType.SINGLE, 1, 5.0, day2), obs(PackType.PACK, 10, 25.0, day2)])], day2)
+    # a different listing seen only on day 1 (e.g. one skipped scrape) is NOT hidden by that
+    db.save_products(conn, [ScrapedProduct(listing=other, prices=[obs(PackType.SINGLE, 1, 6.0, day1)])], day1)
+    ingest.run_matching(conn)
+
+    got = queries.compare(conn, "ACT", limit=50, now=day2)
+    by_name = {p["name"]: p for p in got["products"]}
+    options = lambda name: sorted((o["units"], o["price"]) for o in by_name[name]["retailers"]["bws"]["options"])
+    assert options("Test Lager Cans 375ml") == [(1, 5.0), (10, 25.0)]       # no more "10 for $5"
+    assert options("Other Lager Cans 375ml") == [(1, 6.0)]                   # still shown, just older
+
+
+def test_a_pack_that_disappears_stops_being_listed(tmp_path):
+    from common.records import Listing, PackType, PriceObservation, Retailer, ScrapedProduct
+    conn = db.connect(str(tmp_path / "gone.sqlite3"))
+    listing = Listing(retailer=Retailer.BWS, retailer_sku="1", url="https://bws.com.au/p/1", name="Test Lager Cans 375ml", abv=4.5)
+    loc = ingest.bws.location_from_set_pickup(json.loads((F / "bws_2606_set_pickup.json").read_text()))
+    db.upsert_location(conn, loc)
+    day1 = datetime(2026, 10, 1, 4, tzinfo=timezone.utc)
+    day2 = day1 + timedelta(days=1)
+    mk = lambda pack, units, price, when: PriceObservation(pack_type=pack, units=units, price=price, location_key=loc.location_key, observed_at=when)
+    db.save_products(conn, [ScrapedProduct(listing=listing, prices=[mk(PackType.SINGLE, 1, 5.0, day1), mk(PackType.PACK, 6, 24.0, day1)])], day1)
+    db.save_products(conn, [ScrapedProduct(listing=listing, prices=[mk(PackType.SINGLE, 1, 5.0, day2)])], day2)   # 6-pack went out of stock
+    ingest.run_matching(conn)
+    (p,) = queries.compare(conn, "ACT", limit=5, now=day2)["products"]
+    assert [(o["units"], o["price"]) for o in p["retailers"]["bws"]["options"]] == [(1, 5.0)]

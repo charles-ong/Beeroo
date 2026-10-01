@@ -440,3 +440,50 @@ def test_http_push_refuses_to_send_the_token_over_plain_http():
     with pytest.raises(ValueError, match="plain http"):
         ss.http_push("http://beeroo.example.com", "tok")
     ss.http_push("https://beeroo.example.com", "tok")  # fine
+
+
+# ---- finding a browser when Playwright's pinned build isn't installed ---------------
+
+
+def make_chromium(root, rev, mac=True):
+    d = root / f"chromium-{rev}"
+    exe = (d / "chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing") if mac else (d / "chrome-linux/chrome")
+    exe.parent.mkdir(parents=True)
+    exe.write_text("")
+    return str(exe)
+
+
+def test_discover_picks_the_newest_installed_chromium(tmp_path):
+    make_chromium(tmp_path, 1200)
+    newest = make_chromium(tmp_path, 1243)
+    (tmp_path / "chromium_headless_shell-1300").mkdir()          # headless shells are not usable for headed runs
+    (tmp_path / "firefox-1543").mkdir()
+    assert ss.discover_chromium(tmp_path) == newest
+
+
+def test_discover_handles_linux_layout_and_nothing_installed(tmp_path):
+    linux = make_chromium(tmp_path, 1100, mac=False)
+    assert ss.discover_chromium(tmp_path) == linux
+    assert ss.discover_chromium(tmp_path / "empty") is None
+
+
+def test_numeric_revisions_sort_numerically_not_alphabetically(tmp_path):
+    make_chromium(tmp_path, 999)
+    big = make_chromium(tmp_path, 1243)
+    assert ss.discover_chromium(tmp_path) == big
+
+
+def test_browser_resolution_order(tmp_path):
+    cached = make_chromium(tmp_path / "cache", 1243)
+    pinned = tmp_path / "pinned"
+    pinned.write_text("")
+    explicit = tmp_path / "mine"
+    explicit.write_text("")
+    # explicit path wins; Playwright's own build is used when it exists; else the cache; else a clear error
+    assert ss.resolve_browser_path(str(explicit), str(pinned), tmp_path / "cache") == str(explicit)
+    assert ss.resolve_browser_path(None, str(pinned), tmp_path / "cache") is None
+    assert ss.resolve_browser_path(None, str(tmp_path / "missing"), tmp_path / "cache") == cached
+    with pytest.raises(ss.NoBrowser, match="playwright install chromium"):
+        ss.resolve_browser_path(None, str(tmp_path / "missing"), tmp_path / "nothing")
+    with pytest.raises(ss.NoBrowser, match="does not exist"):
+        ss.resolve_browser_path(str(tmp_path / "typo"), str(pinned), tmp_path / "cache")
