@@ -193,8 +193,11 @@ def collect_products(collector, location_key, observed_at=None):
     return list(by_sku.values()), errors
 
 
-async def scrape(page, postcode, max_pages=MAX_PAGES):
-    """Returns (location, products, errors, expected_total)."""
+async def scrape(page, postcode, max_pages=MAX_PAGES, raw_pages=None):
+    """Returns (location, products, errors, expected_total).
+
+    If `raw_pages` is a list, the raw Browse payloads (in page order) are
+    appended to it so callers can forward them to a server for parsing."""
     collector = BrowseCollector()
     page.on(
         "response", lambda r: asyncio.ensure_future(collector.on_response(r))
@@ -217,5 +220,8 @@ async def scrape(page, postcode, max_pages=MAX_PAGES):
 
     await load_all_pages(page, collector, max_pages)
     products, errors = collect_products(collector, location.location_key)
+
+    if raw_pages is not None:
+        raw_pages.extend(collector.pages[n] for n in sorted(collector.pages))
 
     return location, products, errors, collector.total

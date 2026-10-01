@@ -1,0 +1,15 @@
+# Optional: nightly promotion/expiry of crowd contributions on the deployed server.
+# Only useful once BEEROO_CONTRIB_ENABLED=1. Needs repo secrets BEEROO_SERVER
+# (e.g. https://beeroo.example.com) and BEEROO_ADMIN_TOKEN.
+name: Promote contributions
+on:
+  schedule: [{ cron: "0 18 * * *" }]   # 04:00 Sydney (standard time)
+  workflow_dispatch: {}
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    steps:
+      - run: >
+          curl -fsS -X POST
+          -H "X-Admin-Token: ${{ secrets.BEEROO_ADMIN_TOKEN }}"
+          "${{ secrets.BEEROO_SERVER }}/api/contrib/promote"

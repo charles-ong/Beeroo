@@ -8,12 +8,13 @@ const PAGE = 40;
 const $ = (id) => document.getElementById(id);
 const state = { postcode: "", offset: 0, lastQuery: "" };
 
-// ---- tiny safe DOM builder (never uses innerHTML) --------------------------
+// ---- tiny safe DOM builder (text only; never builds HTML strings) ----------
 function h(tag, attrs, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
     if (v == null || v === false) continue;
     if (k === "class") el.className = v;
+    else if (k === "style") el.style.cssText = v; // CSSOM is allowed by our strict CSP; the style attribute is not
     else if (k.startsWith("on")) el.addEventListener(k.slice(2), v);
     else el.setAttribute(k, v === true ? "" : v);
   }

@@ -438,3 +438,56 @@ def health(conn, now=None):
 
     pending = conn.execute("SELECT COUNT(*) c FROM staged_observations WHERE status = 'pending'").fetchone()["c"]
     return {"retailers": out, "pending_prices": pending}
+
+
+# --------------------------------------------------------------------------
+# Trusted (first-party) ingest: our own scheduled scraper / manual captures
+# --------------------------------------------------------------------------
+
+
+class IngestIn(BaseModel):
+    kind: Literal["dan_murphys_browse", "bws_products", "liquorland_products"]
+    location: Optional[LocationIn] = None
+    payload: dict
+    observed_at: Optional[datetime] = None
+
+
+def ingest_trusted(conn, body, now=None):
+    """Write prices from a trusted source straight into the price history
+    (no quorum). Auth is the caller's job (admin token)."""
+    now = now or datetime.now(timezone.utc)
+    when = body.observed_at or now
+
+    if when > now + timedelta(minutes=5):
+        raise ContribError(422, "observed_at is in the future")
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+
+    location = resolve_location(body.kind, body.location, body.payload)
+
+    try:
+        products, errors = parse_payload(body.kind, body.payload, location, when)
+    except Exception:
+        raise ContribError(422, "parse: payload is not in the expected format")
+
+    if drift_share(errors) > DRIFT_ERROR_SHARE:
+        raise ContribError(422, "parse: too many unrecognised items (format may have changed)")
+    if not products:
+        raise ContribError(422, "parse: no usable products in payload")
+
+    before = conn.execute("SELECT COUNT(*) c FROM listings").fetchone()["c"]
+    db.upsert_location(conn, location)
+    inserted = db.save_products(conn, products, when)
+    after = conn.execute("SELECT COUNT(*) c FROM listings").fetchone()["c"]
+
+    if after > before:
+        run_matching(conn)
+
+    return {
+        "status": "ingested",
+        "location_key": location.location_key,
+        "products": len(products),
+        "new_observations": inserted,
+        "new_listings": after - before,
+        "skipped": len(errors),
+    }

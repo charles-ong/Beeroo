@@ -12,3 +12,7 @@ tests/fixtures/bws/
 tests/fixtures/bws6000/
 tests/fixtures/liquorland/
 tests/fixtures/liquorland6000/
+data/*.log
+data/.scrape.lock
+data/scrape_state.json
+data/backups/

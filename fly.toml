@@ -1,0 +1,33 @@
+# Fly.io config. Change `app` to a unique name, then see docs/DEPLOYMENT.md.
+app = "beeroo-CHANGE-ME"
+primary_region = "syd"
+
+[build]
+
+[env]
+  BEEROO_ENV = "production"
+  BEEROO_DB = "/data/beeroo.sqlite3"
+  # Public crowd contributions stay closed until you decide (legal review first):
+  BEEROO_CONTRIB_ENABLED = "0"
+
+[[mounts]]
+  source = "beeroo_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"     # single always-on machine: SQLite on one volume
+  auto_start_machines = false
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    method = "GET"
+    path = "/healthz"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "15s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

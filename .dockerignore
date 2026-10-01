@@ -1,0 +1,13 @@
+.venv
+.git
+.github
+data
+tests
+extension
+docs
+deploy
+*.har
+__pycache__
+*.pyc
+*.sqlite3
+.DS_Store
