@@ -7,6 +7,7 @@ from common.output import get_timestamp
 from common.parsing import (
     extract_product_name,
     extract_price_options,
+    merge_split_price_lines,
     parse_price,
     resolve_multi_pack_prices,
 )
@@ -119,6 +120,7 @@ async def load_all_products(page):
 
 
 def scrape_card_lines(lines, url):
+    lines = merge_split_price_lines(lines)
     name = extract_product_name(lines)
 
     if not name:

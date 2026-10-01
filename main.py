@@ -3,12 +3,16 @@ import json
 
 from playwright.async_api import async_playwright
 
+from common import db
+from common.normalise import legacy_to_scraped_products
 from common.output import deduplicate_products
+from common.records import utcnow
 from scrapers.dan_murphys import scrape_all
 
 
 HEADLESS = False
 OUTPUT_FILE = "data/dan_murphys_beer.json"
+DB_FILE = "data/beeroo.sqlite3"
 
 
 async def main():
@@ -49,6 +53,20 @@ async def main():
                 )
 
             print(f"Saved to {OUTPUT_FILE}")
+
+            records, errors = legacy_to_scraped_products(products)
+
+            for row, reason in errors:
+                print(f"Skipped {row.get('name')!r}: {reason}")
+
+            conn = db.connect(DB_FILE)
+            inserted = db.save_products(conn, records, utcnow())
+            conn.close()
+
+            print(
+                f"{len(records)} listings, {inserted} new price "
+                f"observations, {len(errors)} rejected -> {DB_FILE}"
+            )
 
         finally:
             await browser.close()

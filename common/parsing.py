@@ -53,46 +53,47 @@ def parse_price(line):
     return None
 
 
+_MULTI_BUY_UNITS = {
+    "pack": {"pack", "packs"},
+    "case": {"case", "cases"},
+}
+
+
 def resolve_multi_pack_prices(price_options):
-    pack_size = None
+    """Turn '$X for N packs/cases' into a total unit count (N x pack size)."""
+    sizes = {}
 
     for option in price_options:
-        if option.get("is_multi_pack"):
+        if option.get("is_multi_pack") or option.get("quantity") is None:
             continue
 
-        if (
-            option.get("unit", "").lower() in {"pack", "packs"}
-            and option.get("quantity") is not None
-        ):
-            pack_size = option["quantity"]
-            break
+        unit = (option.get("unit") or "").lower()
+
+        for canonical, aliases in _MULTI_BUY_UNITS.items():
+            if unit in aliases and canonical not in sizes:
+                sizes[canonical] = option["quantity"]
 
     resolved = []
 
     for option in price_options:
-        if not option.get("is_multi_pack"):
-            resolved.append({
-                "price": option["price"],
-                "quantity": option["quantity"],
-                "unit": option["unit"],
-            })
-            continue
+        quantity = option["quantity"]
+        unit = option["unit"]
 
-        if (
-            option["unit"].lower() in {"pack", "packs"}
-            and pack_size is not None
-        ):
-            resolved.append({
-                "price": option["price"],
-                "quantity": option["quantity"] * pack_size,
-                "unit": "pack",
-            })
-        else:
-            resolved.append({
-                "price": option["price"],
-                "quantity": option["quantity"],
-                "unit": option["unit"],
-            })
+        if option.get("is_multi_pack"):
+            for canonical, aliases in _MULTI_BUY_UNITS.items():
+                if (
+                    (unit or "").lower() in aliases
+                    and canonical in sizes
+                ):
+                    quantity = option["quantity"] * sizes[canonical]
+                    unit = canonical
+                    break
+
+        resolved.append({
+            "price": option["price"],
+            "quantity": quantity,
+            "unit": unit,
+        })
 
     return resolved
 
@@ -132,7 +133,12 @@ def extract_product_name(lines):
             "MEMBER OFFER",
             "NON-MEMBER",
             "ADD TO CART",
+            "SPONSORED",
         }:
+            continue
+
+        # review-count fragments such as "(116" or ")"
+        if re.fullmatch(r"[()\s\d]*", line):
             continue
 
         if "$" in line:
@@ -152,7 +158,7 @@ def extract_product_name(lines):
 def normalise_price_option(option, product_name):
     if (
         option["quantity"] is None
-        and option.get("unit", "").lower() == "each"
+        and (option.get("unit") or "").lower() == "each"
     ):
         title_quantity = extract_title_quantity(product_name)
 
@@ -162,6 +168,38 @@ def normalise_price_option(option, product_name):
         }
 
     return option
+
+
+_BARE_PRICE_RE = re.compile(r"\$\d+(?:\.\d{1,2})?")
+_UNIT_LINE_RE = re.compile(
+    r"(?:[A-Za-z]+\s*\((?:\d+|[A-Za-z][A-Za-z\- ]*)\)"
+    r"|for\s+\d+\s+[A-Za-z]+"
+    r"|each|case|cases|pack|packs|block|bottles|single)",
+    re.IGNORECASE,
+)
+
+
+def merge_split_price_lines(lines):
+    """Rejoin '$71.99' + 'case (24)' when markup put them on separate lines."""
+    merged = []
+    i = 0
+
+    while i < len(lines):
+        line = lines[i]
+
+        if (
+            _BARE_PRICE_RE.fullmatch(line)
+            and i + 1 < len(lines)
+            and _UNIT_LINE_RE.fullmatch(lines[i + 1])
+        ):
+            merged.append(f"{line} {lines[i + 1]}")
+            i += 2
+            continue
+
+        merged.append(line)
+        i += 1
+
+    return merged
 
 
 def extract_price_options(lines, product_name):
