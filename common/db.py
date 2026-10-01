@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS products (
     name TEXT NOT NULL,
     abv REAL,
     unit_volume_ml REAL,
-    category TEXT
+    category TEXT,
+    abv_source TEXT
 );
 
 CREATE TABLE IF NOT EXISTS locations (
@@ -193,3 +194,95 @@ def price_history(conn, listing_id, location_key="national"):
         """,
         (listing_id, location_key),
     ).fetchall()
+
+
+def load_listings(conn):
+    """All listings as (listing_id, product_id, Listing)."""
+    from common.records import Listing, Retailer
+
+    rows = conn.execute("SELECT * FROM listings ORDER BY id").fetchall()
+    return [
+        (
+            row["id"],
+            row["product_id"],
+            Listing(
+                retailer=Retailer(row["retailer"]),
+                retailer_sku=row["retailer_sku"],
+                url=row["url"],
+                name=row["name"],
+                brand=row["brand"],
+                category=row["category"],
+                abv=row["abv"],
+                unit_volume_ml=row["unit_volume_ml"],
+            ),
+        )
+        for row in rows
+    ]
+
+
+def save_matches(conn, clusters):
+    """Persist clusters as canonical products (idempotent).
+
+    A cluster reuses the product already linked to any of its listings.
+    ABV comes from the first member that states it; abv_source records which
+    retailer, so the UI can say where an ABV came from.
+    """
+    from common.matching import consensus_abv
+
+    ids = {
+        (row["retailer"], row["retailer_sku"]): (row["id"], row["product_id"])
+        for row in conn.execute(
+            "SELECT id, retailer, retailer_sku, product_id FROM listings"
+        )
+    }
+    saved = 0
+
+    for cluster in clusters:
+        keys = [(r.value, sku) for r, sku, _ in cluster.members]
+        known = [ids[k] for k in keys if k in ids]
+
+        if not known:
+            continue
+
+        abv, source = consensus_abv(cluster)
+        first = cluster.members[0][2]
+        product_id = next((pid for _, pid in known if pid), None)
+
+        if product_id is None:
+            product_id = conn.execute(
+                """
+                INSERT INTO products
+                    (brand, name, abv, unit_volume_ml, category, abv_source)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    first.brand,
+                    first.name,
+                    abv,
+                    first.unit_volume_ml,
+                    first.category,
+                    source.value if source else None,
+                ),
+            ).lastrowid
+        else:
+            conn.execute(
+                """
+                UPDATE products SET abv = COALESCE(abv, ?),
+                    abv_source = COALESCE(abv_source, ?)
+                WHERE id = ?
+                """,
+                (abv, source.value if source else None, product_id),
+            )
+
+        confidence = 1.0 if len(cluster.members) > 1 else None
+
+        for listing_id, _ in known:
+            conn.execute(
+                "UPDATE listings SET product_id = ?, match_confidence = ? WHERE id = ?",
+                (product_id, confidence, listing_id),
+            )
+
+        saved += 1
+
+    conn.commit()
+    return saved
