@@ -22,3 +22,8 @@ Ground rules: no CAPTCHA solving, no stealth/proxy/fingerprint evasion, low requ
 - Clicking a store card actually changes the store and Browse prices (final steps of `select_location`).
 - Full pagination to ~404 products via "Load more".
 - Whether prices differ between stores/states (the key assumption behind postcode support).
+
+## BWS / Liquorland status
+- No fixtures yet. `scrapers/endeavour.py` is a shared, retailer-parameterised parser for the Dan Murphy's "Browse" format; BWS (also Endeavour) *may* use the same format - **unverified**.
+- Liquorland (Coles Group) has an unknown format (robots.txt hints at Fredhopper `fh_` parameters). No parser written until we have real data.
+- Plan: capture via `docs/CAPTURE_GUIDE.md` + `scripts/har_to_fixtures.py`.
