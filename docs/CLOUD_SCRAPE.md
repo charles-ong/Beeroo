@@ -21,7 +21,8 @@ freshness report says so. Cost: $0 (check GitHub's and Cloudflare's current free
    ```bash
    BEEROO_DATA_REMOTE=git@github.com:charles-ong/Beeroo.git .venv/bin/python scripts/data_branch.py seed --db data/beeroo.sqlite3
    ```
-   It creates the `data` branch (one commit: the database). It refuses to overwrite an existing one.
+   It creates the `data` branch (one commit: the database). It refuses to overwrite an existing one; if a cloud
+   run already saved a thinner database before you seeded, add `--replace` to replace it with your local history.
    Skip this and the first cloud run starts an empty history.
 3. **Cloudflare**: create a Pages API token ("Cloudflare Pages: Edit") and find your account ID. In the repo:
    Settings → Secrets and variables → Actions →
@@ -44,6 +45,7 @@ freshness report says so. Cost: $0 (check GitHub's and Cloudflare's current free
 - The run **fails (red, emails you)** when a site errored or blocked us, but only after it saved the data and deployed.
 - `data/outbox/` on the Mac holds pages that couldn't be pushed (offline); they go with the next run.
 - A page the cloud can't ingest is moved to `inbox/rejected/` on the `data` branch (also in the run's artifact).
+- After a block, that retailer is skipped for 2, 4, 8... days. To retry sooner: Actions → Run workflow → *clear_backoff*.
 - Back-off state for the cloud scraper is saved too (`scrape_state_cloud.json`), so a block is respected across days.
 - To drop Liquorland from the cloud job: change `BEEROO_SKIP_RETAILERS` in the workflow to `dan_murphys,liquorland`.
 - To go back to everything on the Mac: remove `BEEROO_DATA_REMOTE` from the env file and disable the workflow.

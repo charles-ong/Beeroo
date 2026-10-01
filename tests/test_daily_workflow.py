@@ -131,3 +131,11 @@ def test_without_a_data_remote_everything_still_runs_locally(repo):
     run(path)
     text = log.read_text()
     assert "--emit-dir" not in text and "export_static" in text
+
+
+def test_cloud_scrape_spaces_visits_and_can_clear_a_saved_block(wf, steps):
+    scrape = steps[index(steps, "Scrape")]
+    assert "--min-spacing 600" in scrape["run"]
+    assert scrape["env"]["CLEAR_BACKOFF"] == "${{ inputs.clear_backoff || 'none' }}"
+    options = (wf.get("on") or wf.get(True))["workflow_dispatch"]["inputs"]["clear_backoff"]["options"]
+    assert options == ["none", "bws", "liquorland", "all"]

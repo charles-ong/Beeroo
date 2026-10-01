@@ -165,12 +165,13 @@ def save(remote, clone_dir, db_path, state_path=None, attempts=4):
     raise DataBranchError("could not update the data branch (kept losing a race); try again")
 
 
-def seed(remote, db_path):
+def seed(remote, db_path, replace=False):
     work = Path(tempfile.mkdtemp(prefix="beeroo-seed-"))
     try:
         existed = clone(remote, work / "clone")
-        if existed and (work / "clone" / DB_NAME).exists():
-            raise DataBranchError("the data branch already has a database; refusing to overwrite it")
+        if existed and (work / "clone" / DB_NAME).exists() and not replace:
+            raise DataBranchError("the data branch already has a database; refusing to overwrite it "
+                                  "(use --replace to replace it with this one)")
         save(remote, work / "clone", db_path)
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -218,6 +219,7 @@ def main(argv=None):
     s.add_argument("--state", default="data/scrape_state_cloud.json")
     d = sub.add_parser("seed")
     d.add_argument("--db", default="data/beeroo.sqlite3")
+    d.add_argument("--replace", action="store_true", help="overwrite the database already on the branch")
     p = sub.add_parser("push-inbox")
     p.add_argument("--from", dest="source", default="data/outbox")
     p.add_argument("--retailer", default="dan_murphys")
@@ -232,7 +234,7 @@ def main(argv=None):
             save(remote, args.clone, args.db, args.state)
             print("data branch updated")
         elif args.cmd == "seed":
-            seed(remote, args.db)
+            seed(remote, args.db, args.replace)
             print("data branch created from", args.db)
         else:
             n = push_inbox(remote, args.source, args.retailer)

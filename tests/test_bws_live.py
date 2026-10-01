@@ -372,3 +372,52 @@ def test_wait_for_gives_up_after_the_timeout_and_returns_what_it_has():
 
     assert run(bws_live.wait_for(lambda: None, timeout_s=3, step_s=1, sleep=fake_sleep)) is None
     assert len(slept) == 3
+
+
+# ---- LOAD MORE vanishing mid-click ----------------------------------------------
+
+
+class FakeMore:
+    def __init__(self, page):
+        self.page = page
+        self.first = self
+
+    def get_by_text(self, *a, **k):
+        return self
+
+    def locator(self, *a, **k):
+        return self
+
+    async def count(self):
+        return 1 if self.page.clicks < self.page.pages else 0
+
+    async def click(self, timeout=None):
+        self.page.clicks += 1
+        if self.page.fail_on == self.page.clicks:
+            raise TimeoutError("Locator.click: Timeout exceeded")
+        base = len(self.page.collector.items)
+        self.page.collector.items.update({base + i: object() for i in range(40)})
+
+
+class FakePage:
+    def __init__(self, collector, pages, fail_on=None):
+        self.collector, self.pages, self.fail_on, self.clicks = collector, pages, fail_on, 0
+        self.more = FakeMore(self)
+        self.mouse = self
+
+    def get_by_text(self, *a, **k):
+        return self.more
+
+    async def wait_for_timeout(self, ms):
+        pass
+
+    async def wheel(self, x, y):
+        pass
+
+
+def test_a_vanishing_load_more_link_does_not_lose_the_scrape(monkeypatch):
+    monkeypatch.setattr(bws_live, "PAUSE_RANGE_S", (0, 0))
+    collector = bws_live.BwsCollector()
+    page = FakePage(collector, pages=5, fail_on=3)
+    run(bws_live.load_all(page, collector, max_rounds=30))            # must not raise
+    assert len(collector.items) >= 40 * 4                            # kept clicking after the failure

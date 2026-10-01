@@ -102,6 +102,16 @@ def test_seed_refuses_to_overwrite_an_existing_database(remote, tmp_path):
         dbr.seed(remote, local)
 
 
+def test_seed_replace_overwrites_on_request(remote, tmp_path):
+    first, second = tmp_path / "a.sqlite3", tmp_path / "b.sqlite3"
+    make_db(first, rows=1)
+    make_db(second, rows=5)
+    dbr.seed(remote, first)
+    dbr.seed(remote, second, replace=True)
+    dbr.restore(remote, tmp_path / "c", tmp_path / "d")
+    assert sqlite3.connect(tmp_path / "d" / dbr.DB_NAME).execute("SELECT COUNT(*) FROM t").fetchone()[0] == 5
+
+
 def test_push_failure_keeps_local_files(tmp_path):
     outbox = tmp_path / "outbox"
     outbox.mkdir()

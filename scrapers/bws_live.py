@@ -167,7 +167,12 @@ async def load_all(page, collector, max_rounds=MAX_ROUNDS):
     for _ in range(max_rounds):
         await asyncio.sleep(random.uniform(*PAUSE_RANGE_S))
         if await more.count():
-            await more.first.click()
+            try:
+                await more.first.click(timeout=10000)
+            except Exception as e:  # noqa: BLE001
+                # The link can vanish between the check and the click (last page, or the list
+                # re-rendering). Keep what we have rather than lose the whole scrape.
+                log.warning("LOAD MORE went away before it could be clicked (%s); carrying on", type(e).__name__)
         else:
             await page.mouse.wheel(0, 2500)   # fallback for lazy-loaded chunks
         await page.wait_for_timeout(2500)

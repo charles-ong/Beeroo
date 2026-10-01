@@ -17,6 +17,12 @@ on:
   schedule:
     - cron: "0 19 * * *"
   workflow_dispatch:
+    inputs:
+      clear_backoff:
+        description: Forget a saved block first (a retailer that blocked us is skipped for days)
+        type: choice
+        default: none
+        options: [none, bws, liquorland, all]
 
 permissions:
   contents: write        # only to update the `data` branch
@@ -58,10 +64,16 @@ jobs:
 
       - name: Scrape BWS and Liquorland (headed, on a virtual display)
         id: scrape
+        env:
+          CLEAR_BACKOFF: ${{ inputs.clear_backoff || 'none' }}
         run: |
           set +e
+          EXTRA=""
+          [ "$CLEAR_BACKOFF" != "none" ] && EXTRA="--clear-backoff $CLEAR_BACKOFF"
+          # --min-spacing: on average at least 10 minutes between visits to the same site
+          # (a 3-minute gap got Liquorland's bot protection to appear on the second state)
           xvfb-run -a --server-args="-screen 0 1440x900x24" \
-            python scripts/scheduled_scrape.py \
+            python scripts/scheduled_scrape.py $EXTRA --min-spacing 600 \
               --state data/scrape_state_cloud.json --db data/beeroo.sqlite3 \
               > data/result.json
           echo "exit_code=$?" >> "$GITHUB_OUTPUT"
