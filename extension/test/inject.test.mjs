@@ -26,7 +26,7 @@ const response = (json, url) => ({ url, clone() { return { json: async () => jso
 const tick = () => new Promise((r) => setTimeout(r, 5));
 
 test("fetch: matching responses are reported, the page still gets the original response", async () => {
-  const url = "https://api.bws.com.au/apis/ui/ProductGroup/Products/beer_bestsellers";
+  const url = "https://api.bws.com.au/apis/ui/ProductGroup/Products/beer-bestsellers";
   const original = response({ Items: [] }, url);
   const { win, posted } = makeWindow({ fetchImpl: async () => original });
   const got = await win.fetch(url, { method: "GET" });

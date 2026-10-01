@@ -17,13 +17,15 @@ test("non-beer departments are recognised as not beer", () => {
 
 test("wrong verbs are ignored", () => {
   assert.equal(classify(BROWSE, "GET"), null);
-  assert.equal(classify("https://api.bws.com.au/apis/ui/ProductGroup/Products/beer_bestsellers", "POST"), null);
+  assert.equal(classify("https://api.bws.com.au/apis/ui/ProductGroup/Products/beer-bestsellers", "POST"), null);
 });
 
 test("BWS product groups and store responses", () => {
-  const p = classify("https://api.bws.com.au/apis/ui/ProductGroup/Products/beer_bestsellers?x=1", "GET");
+  const p = classify("https://api.bws.com.au/apis/ui/ProductGroup/Products/beer-bestsellers?x=1", "GET");
   assert.deepEqual([p.role, p.kind, p.beer], ["products", "bws_products", true]);
   assert.equal(classify("https://api.bws.com.au/apis/ui/ProductGroup/Products/wine-reds", "GET").beer, false);
+  // SetPickupByStoreNo is a POST in the real site (this was the bug: GET-only matching ignored it)
+  assert.equal(classify("https://api.bws.com.au/apis/ui/Address/SetPickupByStoreNo", "POST").role, "location");
   assert.equal(classify("https://api.bws.com.au/apis/ui/Address/SetPickupByStoreNo", "GET").role, "location");
   assert.equal(classify("https://api.bws.com.au/apis/ui/StoreLocator/Store", "GET").role, "location");
 });
@@ -34,10 +36,10 @@ test("store SEARCH results are not treated as the selected store", () => {
 });
 
 test("Liquorland category lists, but not product detail or other APIs", () => {
-  const list = classify("https://www.liquorland.com.au/api/products/ll_act/beer-and-cider", "GET");
+  const list = classify("https://www.liquorland.com.au/api/products/ll/act/beer-and-cider", "GET");
   assert.deepEqual([list.kind, list.beer], ["liquorland_products", true]);
-  assert.equal(classify("https://www.liquorland.com.au/api/products/ll_wa/wine", "GET").beer, false);
-  assert.equal(classify("https://www.liquorland.com.au/api/products/ll_act/beer-and-cider/3813708_ea", "GET"), null);
+  assert.equal(classify("https://www.liquorland.com.au/api/products/ll/wa/wine", "GET").beer, false);
+  assert.equal(classify("https://www.liquorland.com.au/api/products/ll/act/beer-and-cider/3813708_ea", "GET"), null);
   assert.equal(classify("https://www.liquorland.com.au/api/auth/ll/anonymous_access_token", "GET"), null);
   assert.equal(classify("https://www.liquorland.com.au/api/order/ll/carts/abc", "GET"), null);
 });
@@ -47,4 +49,16 @@ test("look-alike and unrelated hosts are ignored", () => {
     assert.equal(classify(`https://${host}/apis/ui/Browse`, "POST", '{"department":"beer"}'), null, host);
   }
   assert.equal(classify("not a url", "GET"), null);
+});
+
+
+test("the old, wrong Liquorland path (ll_act) no longer matches; the real one does", () => {
+  assert.equal(classify("https://www.liquorland.com.au/api/products/ll_act/beer-and-cider", "GET"), null);
+  assert.equal(classify("https://www.liquorland.com.au/api/products/ll/nsw/beer-and-cider?fh_start_index=60", "GET").kind, "liquorland_products");
+});
+
+test("Dan Murphy's store changes via any method are recognised as location", () => {
+  for (const m of ["GET", "POST", "PUT"]) {
+    assert.equal(classify("https://api.danmurphys.com.au/apis/ui/Fulfilment/Preferences", m).role, "location", m);
+  }
 });

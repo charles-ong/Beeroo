@@ -1,6 +1,7 @@
 import { sanitizePayload } from "./lib/sanitize.js";
 import { SAMPLE_KIND, SAMPLE_RESPONSE } from "./lib/sample.js";
 import { newInstallId } from "./lib/contribution.js";
+import { explain, RETAILER_NAMES } from "./lib/reasons.js";
 
 const $ = (id) => document.getElementById(id);
 const DEFAULTS = { consented: false, paused: false, serverUrl: "http://127.0.0.1:8000" };
@@ -17,10 +18,42 @@ async function load() {
   $("consent").checked = s.consented;
   $("ack").checked = s.consented;
   $("server").value = s.serverUrl;
+  for (const r of Object.keys(RETAILER_NAMES)) $("vouch_" + r).checked = !!(s.assumeLoggedOut && s.assumeLoggedOut[r]);
   let id = installId;
   if (!id) { id = newInstallId(); await chrome.storage.local.set({ installId: id }); }
   $("installId").textContent = id;
   await renderLog();
+  await renderDiag();
+}
+
+async function renderDiag() {
+  const { diag } = await chrome.storage.local.get("diag");
+  const rows = [];
+  for (const [retailer, reasons] of Object.entries((diag && diag.byRetailer) || {})) {
+    for (const [reason, slot] of Object.entries(reasons).sort((a, b) => b[1].last - a[1].last)) {
+      const [cls, text] = explain(reason);
+      const tr = document.createElement("tr");
+      [RETAILER_NAMES[retailer] || retailer, text, slot.count, new Date(slot.last).toLocaleString("en-AU")].forEach((v, i) => {
+        const td = document.createElement("td");
+        td.textContent = v;
+        if (i === 1) td.className = cls;
+        tr.append(td);
+      });
+      rows.push(tr);
+    }
+  }
+  if (!rows.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = 4; td.className = "muted"; td.textContent = "Nothing recognised yet. Browse a beer page on one of the three sites.";
+    tr.append(td); rows.push(tr);
+  }
+  $("diag").replaceChildren(...rows);
+  const samples = (diag && diag.samples) || {};
+  $("diag-samples").textContent = Object.keys(samples).length
+    ? "Header text seen when logged-out status couldn't be confirmed: " +
+      Object.entries(samples).map(([r, t]) => `${RETAILER_NAMES[r] || r}: ${t.join(" | ")}`).join("  //  ")
+    : "";
 }
 
 async function renderLog() {
@@ -46,7 +79,8 @@ $("save").addEventListener("click", async () => {
     if (!ok) { $("status").textContent = "Permission to contact that server was declined."; $("status").className = "bad"; return; }
   }
   const { settings } = await chrome.storage.local.get("settings");
-  await chrome.storage.local.set({ settings: { ...DEFAULTS, ...(settings || {}), consented: wantOn, serverUrl: url } });
+  const assumeLoggedOut = Object.fromEntries(Object.keys(RETAILER_NAMES).map((r) => [r, $("vouch_" + r).checked]));
+  await chrome.storage.local.set({ settings: { ...DEFAULTS, ...(settings || {}), consented: wantOn, serverUrl: url, assumeLoggedOut } });
   $("status").textContent = wantOn ? "Saved. Contributing is ON." : "Saved. Contributing is OFF.";
   $("status").className = "ok";
 });
@@ -56,6 +90,7 @@ $("reset").addEventListener("click", async () => {
   await chrome.storage.local.set({ installId: id, seen: {} });
   $("installId").textContent = id;
 });
+$("diag-clear").addEventListener("click", async () => { await chrome.storage.local.set({ diag: { byRetailer: {}, samples: {} } }); renderDiag(); });
 $("clear").addEventListener("click", async () => { await chrome.storage.local.set({ sentLog: [] }); renderLog(); });
 
 load();

@@ -5,15 +5,15 @@ import { createPipeline, MAX_PER_HOUR, PENDING_MS } from "../lib/pipeline.js";
 
 const fx = (n) => JSON.parse(readFileSync(new URL(`../../tests/fixtures/${n}`, import.meta.url)));
 const LOGGED_OUT = ["Offers", "Login"];
-const LL = "https://www.liquorland.com.au/api/products/ll_act/beer-and-cider";
-const BWS_LIST = "https://api.bws.com.au/apis/ui/ProductGroup/Products/beer_bestsellers";
+const LL = "https://www.liquorland.com.au/api/products/ll/act/beer-and-cider";
+const BWS_LIST = "https://api.bws.com.au/apis/ui/ProductGroup/Products/beer-bestsellers";
 const BWS_PICKUP = "https://api.bws.com.au/apis/ui/Address/SetPickupByStoreNo";
 const DM_BROWSE = "https://api.danmurphys.com.au/apis/ui/Browse";
 const DM_PREFS = "https://api.danmurphys.com.au/apis/ui/Fulfilment/Preferences";
 const DM_PREFS_JSON = { FulfilmentMethod: "Click & Collect", ClickAndCollectDetails: { FulfilmentStoreID: "1546", FulfilmentStoreName: "Thornleigh", AddressSuburb: "THORNLEIGH", AddressState: "NSW", AddressPostalCode: "2120" } };
 
 function harness(over = {}) {
-  const mem = { locs: {}, pending: {}, seen: {}, times: [], logs: [], sent: [], clock: 1_000_000 };
+  const mem = { locs: {}, pending: {}, seen: {}, times: [], logs: [], sent: [], diag: [], clock: 1_000_000 };
   const deps = {
     version: "0.1.0",
     now: () => mem.clock,
@@ -27,6 +27,7 @@ function harness(over = {}) {
     getSendTimes: async () => mem.times, setSendTimes: async (t) => { mem.times = t; },
     send: over.send || (async (body) => { mem.sent.push(body); return { status: 202, body: { status: "accepted", products: 3 } }; }),
     log: async (e) => { mem.logs.push(e); },
+    diag: (e) => { mem.diag.push(e); },
   };
   const p = createPipeline(deps);
   const call = (m) => p.handle({ tabId: 1, texts: LOGGED_OUT, method: "GET", ...m });
@@ -69,14 +70,14 @@ test("possible or definite logged-in sessions send nothing", async () => {
 
 test("non-beer pages send nothing", async () => {
   const h = harness();
-  const r = await h.call({ url: "https://www.liquorland.com.au/api/products/ll_act/wine", json: fx("liquorland_act_products.json") });
+  const r = await h.call({ url: "https://www.liquorland.com.au/api/products/ll/act/wine", json: fx("liquorland_act_products.json") });
   assert.equal(r.reason, "not_beer");
   assert.equal((await h.call(dmList({ requestBody: '{"department":"spirits"}' }))).reason, "not_beer");
 });
 
 test("BWS: store first, then products", async () => {
   const h = harness();
-  assert.equal((await h.call({ url: BWS_PICKUP, json: fx("bws_2606_set_pickup.json") })).action, "location_set");
+  assert.equal((await h.call({ url: BWS_PICKUP, method: "POST", json: fx("bws_2606_set_pickup.json") })).action, "location_set");
   assert.equal((await h.call({ url: BWS_LIST, json: fx("bws_2606_products.json") })).action, "sent");
   assert.deepEqual(h.mem.sent[0].location, { store_id: "6723", store_name: "Woden", suburb: "Woden", state: "ACT", postcode: "2606" });
 });
@@ -111,7 +112,7 @@ test("delivery mode never yields a location, so nothing is sent", async () => {
 
 test("a store from one tab is not used for another tab", async () => {
   const h = harness();
-  await h.call({ tabId: 1, url: BWS_PICKUP, json: fx("bws_2606_set_pickup.json") });
+  await h.call({ tabId: 1, url: BWS_PICKUP, method: "POST", json: fx("bws_2606_set_pickup.json") });
   assert.equal((await h.call({ tabId: 2, url: BWS_LIST, json: fx("bws_2606_products.json") })).action, "waiting_for_store");
 });
 
@@ -156,8 +157,56 @@ test("what is sent contains no personalised fields", async () => {
   const raw = fx("bws_2606_products.json");
   raw.Items[0].Products[0].QuantityInTrolley = 3;
   raw.Items[0].Products[0].IsWatched = true;
-  await h.call({ url: BWS_PICKUP, json: fx("bws_2606_set_pickup.json") });
+  await h.call({ url: BWS_PICKUP, method: "POST", json: fx("bws_2606_set_pickup.json") });
   await h.call({ url: BWS_LIST, json: raw });
   const text = JSON.stringify(h.mem.sent[0]);
   for (const f of ["QuantityInTrolley", "IsWatched", "RichDescription", "Westfields"]) assert.ok(!text.includes(f), f);
+});
+
+
+test("BWS: the store the user picks (POST) replaces the default store", async () => {
+  const h = harness();
+  const defaultStore = { StoreNo: "1763", Name: "Umina", Suburb: "Umina Beach", State: "NSW", Postcode: "2257" };
+  await h.call({ url: "https://api.bws.com.au/apis/ui/StoreLocator/Store", json: defaultStore });
+  await h.call({ url: BWS_PICKUP, method: "POST", json: fx("bws_2606_set_pickup.json") });
+  await h.call({ url: BWS_LIST, json: fx("bws_2606_products.json") });
+  assert.equal(h.mem.sent[0].location.store_id, "6723");   // Woden, not Umina
+});
+
+test("diagnostics explain every skip, with the header text when logged-out can't be confirmed", async () => {
+  const h = harness();
+  await h.call({ url: LL, json: fx("liquorland_act_products.json"), texts: ["Hi Sam", "Cart"] });
+  const ev = h.mem.diag.at(-1);
+  assert.deepEqual([ev.retailer, ev.reason], ["liquorland", "maybe_logged_in"]);
+  assert.deepEqual(ev.texts, ["Hi Sam", "Cart"]);
+  await h.call({ url: LL, json: fx("liquorland_act_products.json") });
+  assert.equal(h.mem.diag.at(-1).reason, "sent");
+});
+
+test("diagnostics also cover consent, non-beer, waiting and unusable stores", async () => {
+  const off = harness({ settings: { consented: false } });
+  await off.call({ url: LL, json: {} });
+  assert.equal(off.mem.diag.at(-1).reason, "no_consent");
+  const h = harness();
+  await h.call(dmList({ requestBody: '{"department":"wine"}' }));
+  assert.equal(h.mem.diag.at(-1).reason, "not_beer");
+  await h.call(dmList());
+  assert.equal(h.mem.diag.at(-1).reason, "waiting_for_store");
+  await h.call({ url: DM_PREFS, json: { ...DM_PREFS_JSON, FulfilmentMethod: "Delivery" } });
+  assert.equal(h.mem.diag.at(-1).reason, "location_unusable");
+});
+
+test("unrelated traffic leaves no diagnostics noise", async () => {
+  const h = harness();
+  await h.call({ url: "https://example.com/x", json: {} });
+  assert.equal(h.mem.diag.length, 0);
+});
+
+test("a user can vouch for a site when its header can't be read", async () => {
+  const h = harness({ settings: { assumeLoggedOut: { liquorland: true } } });
+  const r = await h.call({ url: LL, json: fx("liquorland_act_products.json"), texts: [] });
+  assert.equal(r.action, "sent");
+  // ...but only for the site they vouched for
+  const other = harness({ settings: { assumeLoggedOut: { bws: true } } });
+  assert.equal((await other.call({ url: LL, json: fx("liquorland_act_products.json"), texts: [] })).reason, "maybe_logged_in");
 });

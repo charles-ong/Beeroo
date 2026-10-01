@@ -17,5 +17,15 @@ test("fails closed: unknown page state is treated as possibly logged in", () => 
   assert.equal(looksLoggedOut([]), false);
   assert.equal(looksLoggedOut(undefined), false);
   assert.equal(looksLoggedOut(["Hi Sam", "My account", "Cart"]), false);
-  assert.equal(looksLoggedOut(["Login help and FAQs"]), false);
+  assert.equal(looksLoggedOut(["Forgot your login details"]), false);
+});
+
+
+test("real Dan Murphy's header text: 'Login My Dan's Account' (and the lone 'Login' span)", () => {
+  assert.equal(looksLoggedOut(["Offers", "Wine", "Login My Dan's Account", "Cart"]), true);
+  assert.equal(looksLoggedOut(["Login"]), true);
+});
+
+test("overlong text is ignored so page copy can't trigger it", () => {
+  assert.equal(looksLoggedOut(["Login to see member prices and enjoy exclusive offers every day"]), false);
 });

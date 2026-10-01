@@ -23,11 +23,22 @@
 <h2>Settings</h2>
 <label class="chk"><input type="checkbox" id="ack"> <span>I understand the above, and I will only browse while <strong>logged out</strong> of these retailers' websites if I want my visits to be shared.</span></label>
 <label class="chk"><input type="checkbox" id="consent"> <span><strong>Turn on contributing.</strong> I agree to share the filtered data described above with Beeroo. I can pause or turn this off at any time. <span class="muted">(The retailers' own terms of use may restrict automated use of their sites; this extension only reads what your browser loads.)</span></span></label>
+<h2>If a site is never detected as "logged out"</h2>
+<p class="muted">The extension looks for a "Log in" link at the top of the page and sends nothing if it can't see one. If you're sure you're logged out of a site but it isn't being detected (see Diagnostics below), you can vouch for that site yourself. Only tick this for sites where you are <strong>not</strong> logged in.</p>
+<label class="chk"><input type="checkbox" id="vouch_dan_murphys"> <span>I'm logged out of Dan Murphy's: skip the check</span></label>
+<label class="chk"><input type="checkbox" id="vouch_bws"> <span>I'm logged out of BWS: skip the check</span></label>
+<label class="chk"><input type="checkbox" id="vouch_liquorland"> <span>I'm logged out of Liquorland: skip the check</span></label>
 <div style="margin:10px 0"><label for="server">Beeroo server</label><input type="url" id="server" placeholder="http://127.0.0.1:8000"></div>
 <div class="row"><button id="save">Save</button><span id="status" role="status"></span></div>
 
 <h2>Your install ID</h2>
 <p class="row"><code id="installId"></code> <button class="secondary" id="reset">Reset ID</button></p>
+
+<h2>Diagnostics: why is (or isn't) it sending?</h2>
+<p class="muted">Counts of what the extension decided on each site since it was installed. If a site shows nothing at all, the extension hasn't recognised any of its requests; open a beer page on that site, reload, and check again.</p>
+<table><thead><tr><th>Site</th><th>Decision</th><th>Times</th><th>Last</th></tr></thead><tbody id="diag"></tbody></table>
+<p class="muted" id="diag-samples"></p>
+<p class="row"><button class="secondary" id="diag-clear">Clear diagnostics</button></p>
 
 <h2>What has been sent</h2>
 <p class="row"><span class="muted" id="count"></span> <button class="secondary" id="clear">Clear log</button></p>

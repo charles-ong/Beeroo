@@ -25,11 +25,23 @@ For a non-local server use `https://...`; Chrome will ask permission to contact 
 ## Tests
 
 ```bash
-cd extension && node --test "test/*.test.mjs"     # 46 tests, no dependencies
+cd extension && node --test "test/*.test.mjs"     # 59 tests, no dependencies
 cd .. && pytest tests/test_extension_payloads.py   # server accepts what the extension builds
 ```
 
 These cover URL matching (incl. look-alike hosts), the allowlist, logged-out detection, the send/skip pipeline (consent, pause, dedupe, rate limit, store waiting, delivery mode), the page interceptor in an isolated VM (it must never change what the page sees), and the manifest's permissions.
+
+## What changed after real-world testing (2026-10-01)
+
+It wasn't logging beers on the sites. Replaying real captured requests found three causes (all fixed, with regression tests built from the real shapes in `test/fixtures/real_requests.json`):
+
+1. **Liquorland was never matched.** The real path is `/api/products/ll/<state>/<category>`; I'd guessed `ll_act` from a file name.
+2. **BWS store selection was ignored.** `SetPickupByStoreNo` is a POST; only GET was accepted, so data would have been tagged with the default (IP-guessed) store.
+3. **Dan Murphy's "Login" was never seen.** It lives in a `<span>` inside `shop-desktop-header`, not in `<header>`/`<nav>`. The collector now picks short text by *position* near the top of the page (verified against the real page markup in `tests/test_extension_dom.py`), and "Login My Dan's Account"-style text is accepted.
+
+New: **Diagnostics** (popup and settings) explain, per site, why something was or wasn't sent, and show the header text seen when logged-out couldn't be confirmed. There's also a per-site "I'm logged out, skip the check" switch for sites whose header can't be read.
+
+BWS and Liquorland header markup has **not** been seen; if either still shows "couldn't confirm you're logged out", send me the header text from Diagnostics.
 
 ## NOT verified yet: needs a real browser (please test these)
 
@@ -37,7 +49,7 @@ The unit tests use captured data. These parts were **never run in Chrome against
 
 - [ ] Extension loads without errors on `chrome://extensions` (check the service worker "Inspect views").
 - [ ] **Logged-out detection:** on each site, while logged out, header/nav text contains a Login/Sign-in control that our check recognises. If not, the extension will silently send nothing; open the retailer page, DevTools console, and check what `content.js` collects (add a `console.log` in `collectTexts`).
-- [ ] **Endpoint paths:** BWS product lists are assumed to be `/apis/ui/ProductGroup/Products/<group>` with group starting `beer`, and the store endpoints `Address/SetPickupByStoreNo` and `StoreLocator/Store` (inferred from capture file names, not seen as raw URLs). Liquorland assumed `/api/products/ll_<state>/<category>`.
+- [x] Endpoint paths and methods are now taken from real captured requests (BWS, Liquorland) and live probes (Dan Murphy's).
 - [ ] **Store capture:** choose a pick-up store on each site and confirm the log shows the right store name/state. Choose *Delivery* and confirm nothing is sent.
 - [ ] **Beer filter:** browse a wine page; nothing should be sent.
 - [ ] **Network wrapping:** the retailer sites keep working normally (cart, search, pagination).

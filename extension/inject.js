@@ -11,7 +11,7 @@
     /\/apis\/ui\/ProductGroup\/Products\/[^/]+\/?$/,
     /\/apis\/ui\/Address\/SetPickupByStoreNo$/,
     /\/apis\/ui\/StoreLocator\/Store$/,
-    /^\/api\/products\/ll_[a-z]+\/[^/]+\/?$/,
+    /^\/api\/products\/ll\/[a-z]+\/[^/]+\/?$/,
   ];
 
   function interesting(rawUrl) {

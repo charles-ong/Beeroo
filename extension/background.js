@@ -64,6 +64,17 @@ const pipeline = createPipeline({
     try { parsed = await res.json(); } catch { /* non-JSON error body */ }
     return { status: res.status, body: parsed };
   },
+  async diag(event) {
+    const { diag } = await chrome.storage.local.get("diag");
+    const d = diag || { byRetailer: {}, samples: {} };
+    const r = (d.byRetailer[event.retailer] ||= {});
+    const slot = (r[event.reason] ||= { count: 0, last: 0 });
+    slot.count += 1;
+    slot.last = event.t;
+    if (event.texts) d.samples[event.retailer] = event.texts;
+    if (event.store) d.lastStore = { ...(d.lastStore || {}), [event.retailer]: event.store };
+    await chrome.storage.local.set({ diag: d });
+  },
   async log(entry) {
     const { sentLog } = await chrome.storage.local.get("sentLog");
     const next = [entry, ...(sentLog || [])].slice(0, MAX_LOG);

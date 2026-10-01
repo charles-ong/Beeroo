@@ -2,17 +2,27 @@
 // Also gathers a few short header/nav texts so the background can check the
 // visitor is logged out. It reads nothing else from the page.
 (function () {
+  // Sites use custom elements and generated class names (e.g. Dan Murphy's
+  // "Login" is a <span> inside <li class="nav-right__item"> in <shop-desktop-header>),
+  // so select by POSITION: short visible text near the top of the page.
+  const HEADER_PX = 220;
+  let cache = { t: 0, texts: [] };
+
   function collectTexts() {
-    const out = [];
-    const nodes = document.querySelectorAll(
-      "header a, header button, nav a, nav button, [class*='login' i], [class*='signin' i], [class*='account' i], [class*='sign-in' i]"
-    );
-    for (const el of nodes) {
+    const now = Date.now();
+    if (now - cache.t < 3000) return cache.texts;
+    const out = new Set();
+    let scanned = 0;
+    for (const el of document.querySelectorAll("a, button, span, div, li, p")) {
+      if (++scanned > 4000 || out.size >= 80) break;
+      if (el.children.length > 3) continue; // skip big containers
+      const r = el.getBoundingClientRect();
+      if (r.width === 0 || r.height === 0 || r.top + window.scrollY > HEADER_PX) continue;
       const t = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
-      if (t && t.length <= 40) out.push(t);
-      if (out.length >= 80) break;
+      if (t && t.length <= 40) out.add(t);
     }
-    return out;
+    cache = { t: now, texts: [...out] };
+    return cache.texts;
   }
 
   window.addEventListener("message", (event) => {
