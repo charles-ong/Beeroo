@@ -89,6 +89,14 @@ async def raise_if_blocked(page, response=None):
     ):
         raise Blocked(f"bot protection page served (title={title!r})")
 
+    try:
+        text = (await page.inner_text("body"))[:3000].lower()
+    except Exception:  # noqa: BLE001 - page may be mid-navigation; the title/url checks above still ran
+        return
+
+    if "think that you are a bot" in text or "solve this captcha" in text or "shieldsquare" in title.lower():
+        raise Blocked(f"bot protection page served (title={title!r})")
+
 
 async def open_category(page, collector):
     collector.reset_pages()

@@ -310,10 +310,29 @@ def test_scrape_error_is_recorded_without_backoff_and_other_retailers_still_run(
     async def boom(postcode, max_pages):
         raise RuntimeError("could not determine the active store")
     code, results, pushed = go(state, {"bws": boom, "dan_murphys": fake("dan_murphys")}, zones_per_run=2)
-    assert code == 1 and len(by(results, "bws")) == 1 and by(results, "bws")[0]["status"] == "error"
+    assert code == 1 and [r["status"] for r in by(results, "bws")] == ["error", "error"]   # each state gets its try
     assert [r["status"] for r in by(results, "dan_murphys")] == ["ok", "ok"]
     st = ss.load_state(state)["retailers"]["bws"]
     assert "active store" in st["zones"]["NSW"]["last_error"] and st["blocked"]["backoff_until"] is None
+
+
+def test_a_retailer_is_dropped_for_the_day_after_three_failures_in_a_row(state):
+    async def boom(postcode, max_pages):
+        raise RuntimeError("odd page")
+    _, results, _ = go(state, {"bws": boom}, zones_per_run=6)
+    assert [r["status"] for r in by(results, "bws")] == ["error"] * ss.MAX_CONSECUTIVE_FAILURES
+
+
+def test_one_bad_state_does_not_cost_the_others_their_day(state):
+    seen = []
+
+    async def flaky(postcode, max_pages):
+        seen.append(postcode)
+        if len(seen) == 1:
+            raise RuntimeError("odd store")
+        return await fake("bws")(postcode, max_pages)
+    _, results, _ = go(state, {"bws": flaky}, zones_per_run=3)
+    assert [r["status"] for r in by(results, "bws")] == ["error", "ok", "ok"]
 
 
 def test_push_failure_is_an_error_and_not_a_success(state):

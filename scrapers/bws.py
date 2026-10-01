@@ -16,6 +16,7 @@ from common.records import (
     ScrapedProduct,
     utcnow,
 )
+from common.postcodes import state_for_postcode
 from common.units import parse_abv, parse_volume_ml
 
 BASE_URL = "https://bws.com.au"
@@ -258,13 +259,18 @@ def location_from_set_pickup(payload):
     if not store_id:
         return None
 
+    postcode = details.get("AddressPostalCode")
+    # BWS's own state field can be wrong ("Melbourne 3000" came back as SA); the
+    # postcode is authoritative, so derive the state from it when it is valid.
+    state = state_for_postcode(postcode) or details.get("AddressState")
+
     return Location(
         retailer=Retailer.BWS,
         store_id=str(store_id),
         store_name=details.get("FulfilmentStoreName"),
         suburb=details.get("AddressSuburb"),
-        state=details.get("AddressState"),
-        postcode=details.get("AddressPostalCode"),
+        state=state,
+        postcode=postcode,
     )
 
 

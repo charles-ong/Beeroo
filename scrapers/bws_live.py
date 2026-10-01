@@ -198,6 +198,7 @@ async def scrape(page, postcode, max_pages=MAX_ROUNDS, raw_pages=None):
         location = await select_store(page, collector, postcode)
     except Exception:
         await page.screenshot(path="data/bws_location_debug.png")
+        await raise_if_blocked(page)     # a bot-protection page mid-way is a block, not a lookup failure
         raise
     if location is None:
         await page.screenshot(path="data/bws_location_debug.png")

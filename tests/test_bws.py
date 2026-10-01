@@ -103,3 +103,18 @@ def test_location_from_set_pickup():
     perth = location_from_set_pickup(load("bws_6000_set_pickup.json"))
     assert (perth.state, perth.postcode) == ("WA", "6000")
     assert location_from_set_pickup({}) is None
+
+
+def test_a_wrong_state_in_the_store_record_is_corrected_from_its_postcode():
+    # real case: BWS Melbourne (3000) was returned with AddressState "SA"
+    payload = {"FulfilmentInfo": {"ClickAndCollectDetails": {
+        "FulfilmentStoreID": 7699, "FulfilmentStoreName": "BWS Melbourne",
+        "AddressSuburb": "Melbourne", "AddressState": "SA", "AddressPostalCode": "3000"}}}
+    loc = location_from_set_pickup(payload)
+    assert (loc.state, loc.postcode) == ("VIC", "3000")
+
+
+def test_state_field_is_used_when_the_postcode_is_unusable():
+    payload = {"FulfilmentInfo": {"ClickAndCollectDetails": {
+        "FulfilmentStoreID": 1, "AddressState": "WA", "AddressPostalCode": None}}}
+    assert location_from_set_pickup(payload).state == "WA"

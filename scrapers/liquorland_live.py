@@ -174,6 +174,7 @@ async def scrape(page, postcode, max_pages=MAX_PAGES, raw_pages=None, expected_s
         store_name = await select_state(page, collector, postcode)
     except Exception:
         await page.screenshot(path="data/liquorland_location_debug.png")
+        await raise_if_blocked(page)     # a bot-protection page mid-way is a block, not a lookup failure
         raise
 
     if not collector.for_site(site):

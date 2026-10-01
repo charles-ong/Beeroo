@@ -47,6 +47,7 @@ ZONES = list(STATES)                       # state codes; postcode = STATES[code
 RETAILERS = ("bws", "liquorland", "dan_murphys")   # interleave order (the reliable ones first)
 KINDS = {"bws": "bws_products", "liquorland": "liquorland_products", "dan_murphys": "dan_murphys_browse"}
 MIN_COMPLETE = 0.8       # share of the site's reported total we must account for
+MAX_CONSECUTIVE_FAILURES = 3   # errors in a row before a retailer is dropped for the day
 MIN_SPACING_S = 180      # minimum average gap between sessions on the SAME site
 MAX_BACKOFF_DAYS = 14
 ROBOTS_BACKOFF_DAYS = 7
@@ -252,8 +253,10 @@ def scrape_one(*, name, zone, scrape, push, rstate, now, max_pages):
                 pushed[k] += r.get(k, 0)
     except Exception as e:  # noqa: BLE001
         entry["last_error"] = f"push failed: {e}"
-        log.exception("%s push failed", name)
-        return {**base, "status": "push_failed", "error": str(e)}
+        log.exception("%s push failed (store %s, %s %s, %s)", name, location.location_key,
+                      location.suburb, location.postcode, location.state)
+        return {**base, "status": "push_failed", "store": location.location_key,
+                "store_postcode": location.postcode, "store_state": location.state, "error": str(e)}
 
     rstate["blocked"] = {"consecutive": 0, "backoff_until": None}
     entry.update(
@@ -292,6 +295,7 @@ def run(*, state_path, scrapes, push, now=None, retailers=None, zones_per_run=le
         plan[name] = [zone] if zone else pick_zones(rstate, zones, zones_per_run)
 
     stopped, last_end, started = set(), {}, False
+    failures = {}      # consecutive error/push_failed results per retailer
 
     for i in range(max((len(v) for v in plan.values()), default=0)):
         for name in names:
@@ -314,8 +318,16 @@ def run(*, state_path, scrapes, push, now=None, retailers=None, zones_per_run=le
             results.append(result)
             save_state(state_path, state)
 
-            if result["status"] in ("blocked", "robots_disallow", "error", "push_failed"):
+            if result["status"] in ("blocked", "robots_disallow"):
                 stopped.add(name)   # this retailer is done for today; the others carry on
+            elif result["status"] in ("error", "push_failed"):
+                # one state failing (e.g. an odd store) must not cost the other states their day
+                failures[name] = failures.get(name, 0) + 1
+                if failures[name] >= MAX_CONSECUTIVE_FAILURES:
+                    log.error("%s: %d failures in a row; stopping it for today", name, failures[name])
+                    stopped.add(name)
+            else:
+                failures[name] = 0
 
     save_state(state_path, state)
     statuses = {r["status"] for r in results}

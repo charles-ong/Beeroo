@@ -147,3 +147,22 @@ def test_the_driver_contains_no_captcha_solving_or_stealth_code():
         text = (Path(__file__).parent.parent / "scrapers" / f"{module}.py").read_text().lower()
         for bad in ("stealth", "undetected", "2captcha", "anticaptcha", "solve_captcha", "proxy", "user_agent=", "webdriver"):
             assert bad not in re.sub(r"never (try to )?solve[^\n]*", "", text), (module, bad)
+
+
+class BodyPage(FakePage):
+    def __init__(self, body, **kw):
+        super().__init__(**kw)
+        self._body = body
+
+    async def inner_text(self, selector):
+        return self._body
+
+
+def test_the_bot_wall_that_stopped_the_cloud_run_is_recognised_by_its_text():
+    # real page from a GitHub runner: ordinary-looking title and URL, bot-wall wording in the body
+    wall = BodyPage("We apologize for the inconvenience...\\n...but your activity and behavior on this site "
+                    "made us think that you are a bot.\\nPlease solve this CAPTCHA to request unblock",
+                    title="Liquorland", url="https://www.liquorland.com.au/error")
+    with pytest.raises(Blocked):
+        run(raise_if_blocked(wall))
+    run(raise_if_blocked(BodyPage("Beer, cider and more", title="Beer | Liquorland")))
