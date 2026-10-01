@@ -14,7 +14,8 @@ your computer, once a day:
 
 - `scripts/scheduled_scrape.py`: the daily scrape. [docs/SCHEDULED_SCRAPE.md](docs/SCHEDULED_SCRAPE.md)
 - `scripts/export_static.py` + `scripts/publish_pages.sh`: build and publish the site. [docs/FREE_HOSTING.md](docs/FREE_HOSTING.md)
-- `scripts/daily_run.sh`: the whole chain (what the scheduler runs).
+- `scripts/daily_run.sh`: the whole chain (what the scheduler runs). Publishes with `scripts/deploy_cloudflare.sh` (Cloudflare Pages) and/or `scripts/publish_pages.sh` (GitHub Pages).
+- `.github/workflows/cloud-scrape-experiment.yml`: a one-click test of whether a free GitHub runner can scrape a site. [docs/SCHEDULED_SCRAPE.md](docs/SCHEDULED_SCRAPE.md#can-the-scraping-move-to-the-cloud-experiment)
 - `scripts/check_freshness.py`: which state/retailer combinations are stale.
 - `app/`: the API + frontend (also used locally, or for the optional paid server in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)).
 - [docs/ACCESS_NOTES.md](docs/ACCESS_NOTES.md): what each retailer's site does, what's been verified live, and the data quirks found.

@@ -1,0 +1,82 @@
+# EXPERIMENT: can a free GitHub-hosted runner scrape a retailer without being blocked?
+# Run it by hand: Actions tab -> "Cloud scrape experiment" -> Run workflow.
+# It scrapes ONE retailer for ONE state (a handful of page loads), in a real
+# (headed) Chromium on a virtual display, and reports a verdict in the run summary.
+# It never tries to get past a block: if the site serves bot protection, it stops.
+#
+# Notes: GitHub-hosted runners use datacenter IP addresses, which retailers often
+# treat with suspicion. Dan Murphy's already blocks headless browsers and our home
+# connection, so expect "blocked"; BWS and Liquorland are the interesting ones.
+# Liquorland's robots.txt disallows the /api/ path its pages load data from (see
+# docs/SCHEDULED_SCRAPE.md); you are choosing to run it by selecting it here.
+# Free-minute allowances and policies change; check GitHub's current terms.
+name: Cloud scrape experiment
+
+on:
+  workflow_dispatch:
+    inputs:
+      retailer:
+        description: Which retailer to try
+        type: choice
+        default: bws
+        options: [bws, liquorland, dan_murphys]
+      state:
+        description: Which state or territory
+        type: choice
+        default: NSW
+        options: [NSW, ACT, VIC, QLD, SA, WA, TAS, NT]
+  # To run it on a schedule instead, uncomment (daily 03:00 Sydney is ~16:00 UTC):
+  # schedule:
+  #   - cron: "0 16 * * *"
+
+permissions:
+  contents: read
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies and Chromium
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Scrape (headed, on a virtual display)
+        id: scrape
+        env:
+          RETAILER: ${{ inputs.retailer || 'bws' }}
+          STATE: ${{ inputs.state || 'NSW' }}
+        run: |
+          mkdir -p data
+          set +e
+          xvfb-run -a --server-args="-screen 0 1440x900x24" \
+            python scripts/scheduled_scrape.py \
+              --retailer "$RETAILER" --zone "$STATE" \
+              --state data/scrape_state.json --db data/beeroo.sqlite3 \
+              --min-spacing 0 > data/result.json
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Summarise
+        if: always()
+        run: python scripts/ci_summary.py data/result.json "${{ steps.scrape.outputs.exit_code }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloud-scrape-experiment
+          path: |
+            data/result.json
+            data/scrape.log
+            data/*.png
+            data/beeroo.sqlite3
+          if-no-files-found: ignore
+          retention-days: 7
