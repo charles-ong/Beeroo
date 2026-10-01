@@ -7,3 +7,8 @@ data/*.json
 *_debug.png
 *.sqlite3
 data/*.png
+*.har
+tests/fixtures/bws/
+tests/fixtures/bws6000/
+tests/fixtures/liquorland/
+tests/fixtures/liquorland6000/

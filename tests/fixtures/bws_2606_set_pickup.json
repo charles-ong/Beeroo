@@ -1,0 +1,85 @@
+{
+ "Success": true,
+ "FulfilmentInfo": {
+  "FulfilmentMethod": "Click & Collect",
+  "IsSystemAddress": false,
+  "ClickAndCollectDetails": {
+   "AddressPhone": "(02) 6132 9310",
+   "DaysToFulfillBackOrder": 4,
+   "BackOrderFulfilmentDate": "2026-10-05T13:52:15.6877413+11:00",
+   "TradingHours": [
+    {
+     "Day": "Today",
+     "OpenHour": "9:00 AM - 8:00 PM"
+    },
+    {
+     "Day": "Tomorrow",
+     "OpenHour": "9:00 AM - 9:00 PM"
+    },
+    {
+     "Day": "Saturday",
+     "OpenHour": "9:00 AM - 9:00 PM"
+    },
+    {
+     "Day": "Sunday",
+     "OpenHour": "9:00 AM - 8:00 PM"
+    },
+    {
+     "Day": "Monday",
+     "OpenHour": "9:00 AM - 8:00 PM"
+    },
+    {
+     "Day": "Tuesday",
+     "OpenHour": "9:00 AM - 8:00 PM"
+    },
+    {
+     "Day": "Wednesday",
+     "OpenHour": "9:00 AM - 8:00 PM"
+    },
+    {
+     "Day": "Thursday",
+     "OpenHour": "9:00 AM - 8:00 PM"
+    }
+   ],
+   "IsOpeningHoursOverridden": false,
+   "FulfilmentStoreID": "6723",
+   "FulfilmentStoreName": "Woden",
+   "AddressId": "2384145",
+   "AddressStreet1": "Westfields Woden, Cnr Hindmarsh & Melrose Drives",
+   "AddressStreet2": "",
+   "AddressSuburb": "Woden",
+   "AddressState": "ACT",
+   "AddressCountry": "Australia",
+   "AddressPostalCode": "2606",
+   "AddressCity": "Woden",
+   "IsClickAndCollectEnabled": true,
+   "IsDeliveryEnabled": true,
+   "IsBackOrderEnabled": true
+  },
+  "DeliveryDetails": {
+   "StoreAddressId": "2384145",
+   "StoreAddressStreet1": "Westfields Woden, Cnr Hindmarsh & Melrose Drives",
+   "StoreAddressStreet2": "",
+   "StoreAddressSuburb": "Woden",
+   "StoreAddressState": "ACT",
+   "StoreAddressCountry": "Australia",
+   "StoreAddressPostalCode": "2606",
+   "RequestedDeliverySuburb": "Woden",
+   "RequestedDeliveryPostcode": "2606",
+   "RequestedDeliveryState": "ACT",
+   "FulfilmentStoreID": "6723",
+   "FulfilmentStoreName": "Woden",
+   "AddressId": null,
+   "AddressStreet1": null,
+   "AddressStreet2": null,
+   "AddressSuburb": null,
+   "AddressState": null,
+   "AddressCountry": null,
+   "AddressPostalCode": null,
+   "AddressCity": null,
+   "IsClickAndCollectEnabled": true,
+   "IsDeliveryEnabled": true,
+   "IsBackOrderEnabled": true
+  }
+ }
+}

@@ -1,0 +1,61 @@
+{
+ "query": "2606",
+ "suggestions": [
+  "Chifley - ACT, 2606",
+  "Lyons - ACT, 2606",
+  "O'malley - ACT, 2606",
+  "Phillip - ACT, 2606",
+  "Swinger Hill - ACT, 2606",
+  "Woden - ACT, 2606"
+ ],
+ "data": [
+  {
+   "id": "8b46010ff3f6555b7abe94e97df09bb3",
+   "postcode": "2606",
+   "state": "ACT",
+   "suburb": "Chifley",
+   "latitude": -35.353521,
+   "longitude": 149.079546
+  },
+  {
+   "id": "d2dcbf15e18708cfe298ea738e1e43d8",
+   "postcode": "2606",
+   "state": "ACT",
+   "suburb": "Lyons",
+   "latitude": -35.339514,
+   "longitude": 149.076118
+  },
+  {
+   "id": "e9c5d76151001352125b58c0343f6f25",
+   "postcode": "2606",
+   "state": "ACT",
+   "suburb": "O'malley",
+   "latitude": -35.354341,
+   "longitude": 149.106771
+  },
+  {
+   "id": "b6b89125131cb9f25fb40467943da6eb",
+   "postcode": "2606",
+   "state": "ACT",
+   "suburb": "Phillip",
+   "latitude": -35.351856,
+   "longitude": 149.091212
+  },
+  {
+   "id": "c620ec65fa109aa2e2c8911b5116af8d",
+   "postcode": "2606",
+   "state": "ACT",
+   "suburb": "Swinger Hill",
+   "latitude": -35.353555,
+   "longitude": 149.097227
+  },
+  {
+   "id": "47f6b2e84321fcea92e7902946ae9869",
+   "postcode": "2606",
+   "state": "ACT",
+   "suburb": "Woden",
+   "latitude": -35.343609,
+   "longitude": 149.087998
+  }
+ ]
+}

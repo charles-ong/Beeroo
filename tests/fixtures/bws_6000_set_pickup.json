@@ -1,0 +1,85 @@
+{
+ "Success": true,
+ "FulfilmentInfo": {
+  "FulfilmentMethod": "Click & Collect",
+  "IsSystemAddress": false,
+  "ClickAndCollectDetails": {
+   "AddressPhone": "(08) 9203 3574",
+   "DaysToFulfillBackOrder": 4,
+   "BackOrderFulfilmentDate": "2026-10-05T14:01:11.1750561+11:00",
+   "TradingHours": [
+    {
+     "Day": "Today",
+     "OpenHour": "8:00 AM - 9:00 PM"
+    },
+    {
+     "Day": "Tomorrow",
+     "OpenHour": "8:00 AM - 9:00 PM"
+    },
+    {
+     "Day": "Saturday",
+     "OpenHour": "8:00 AM - 5:00 PM"
+    },
+    {
+     "Day": "Sunday",
+     "OpenHour": "11:00 AM - 5:00 PM"
+    },
+    {
+     "Day": "Monday",
+     "OpenHour": "8:00 AM - 9:00 PM"
+    },
+    {
+     "Day": "Tuesday",
+     "OpenHour": "8:00 AM - 9:00 PM"
+    },
+    {
+     "Day": "Wednesday",
+     "OpenHour": "8:00 AM - 9:00 PM"
+    },
+    {
+     "Day": "Thursday",
+     "OpenHour": "8:00 AM - 9:00 PM"
+    }
+   ],
+   "IsOpeningHoursOverridden": false,
+   "FulfilmentStoreID": "4261",
+   "FulfilmentStoreName": "Murray Street",
+   "AddressId": "2619116",
+   "AddressStreet1": "166 Murray Street",
+   "AddressStreet2": "",
+   "AddressSuburb": "Perth",
+   "AddressState": "WA",
+   "AddressCountry": "Australia",
+   "AddressPostalCode": "6000",
+   "AddressCity": "Murray Street",
+   "IsClickAndCollectEnabled": true,
+   "IsDeliveryEnabled": false,
+   "IsBackOrderEnabled": true
+  },
+  "DeliveryDetails": {
+   "StoreAddressId": null,
+   "StoreAddressStreet1": null,
+   "StoreAddressStreet2": null,
+   "StoreAddressSuburb": null,
+   "StoreAddressState": null,
+   "StoreAddressCountry": null,
+   "StoreAddressPostalCode": null,
+   "RequestedDeliverySuburb": null,
+   "RequestedDeliveryPostcode": null,
+   "RequestedDeliveryState": null,
+   "FulfilmentStoreID": null,
+   "FulfilmentStoreName": null,
+   "AddressId": null,
+   "AddressStreet1": null,
+   "AddressStreet2": null,
+   "AddressSuburb": null,
+   "AddressState": null,
+   "AddressCountry": null,
+   "AddressPostalCode": null,
+   "AddressCity": null,
+   "IsClickAndCollectEnabled": null,
+   "IsDeliveryEnabled": null,
+   "IsBackOrderEnabled": null
+  }
+ }
+}

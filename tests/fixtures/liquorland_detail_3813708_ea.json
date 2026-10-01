@@ -1,0 +1,204 @@
+{
+ "products": [],
+ "product": {
+  "isClearance": false,
+  "gtin": "",
+  "vintage": "",
+  "country": "Australia",
+  "cellarRating": 0,
+  "cellarDescription": "",
+  "standardDrinks": 1,
+  "alcoholPercent": 4,
+  "productProperties": [
+   {
+    "key": "Style",
+    "value": "Ginger Beer"
+   },
+   {
+    "key": "Standard Drinks",
+    "value": "1.0"
+   },
+   {
+    "key": "Packaging",
+    "value": "Bottle"
+   },
+   {
+    "key": "Alcohol Content",
+    "value": "4.00%"
+   },
+   {
+    "key": "Occasion",
+    "value": "Any occasion"
+   },
+   {
+    "key": "Type",
+    "value": "Ginger Beer"
+   },
+   {
+    "key": "Organic",
+    "value": "No"
+   },
+   {
+    "key": "Food Pair",
+    "value": "Jerk Chicken"
+   },
+   {
+    "key": "Origin",
+    "value": "Australia"
+   },
+   {
+    "key": "Product ID",
+    "value": "3813708_ea"
+   }
+  ],
+  "traits": [
+   {
+    "key": "food_pair",
+    "value": "Jerk Chicken"
+   }
+  ],
+  "bundleProducts": [],
+  "expertReviews": null,
+  "multiUOMPrice": [
+   {
+    "id": "3813708",
+    "gtin": "9344844001337",
+    "cartLimit": 20,
+    "productCode": "3813708",
+    "unitOfMeasure": "PACK6",
+    "brand": "Brookvale Union",
+    "productName": "Brookvale Union Ginger Beer Bottle 330mL",
+    "shortName": "Ginger Beer Bottle 330mL",
+    "price": {
+     "current": 33.0,
+     "normal": 33.0,
+     "acrossAnySix": 0,
+     "memberOnlyPrice": 0.0
+    },
+    "image": {
+     "thumbnailImage": "/-/media/images/products/generic_bundle.ashx?bc=white&h=240&mw=300&isThumbnail=True&productId=3813708_PACK6",
+     "heroImage": "/-/media/images/products/generic_bundle.ashx?h=520&productId=3813708_PACK6",
+     "bundleHeroImage": null
+    },
+    "productUrl": "/beer-and-cider/brookvale-union-ginger-beer-bottle-330ml_3813708",
+    "promotion": {
+     "calloutText": null,
+     "dinkus": null,
+     "catalogue": null
+    },
+    "sellItemId": "3813720"
+   },
+   {
+    "id": "3813708_ea",
+    "gtin": "9344844001320",
+    "cartLimit": 121,
+    "productCode": "3813708",
+    "unitOfMeasure": "ea",
+    "brand": "Brookvale Union",
+    "productName": "Brookvale Union Ginger Beer Bottle 330mL",
+    "shortName": "Ginger Beer Bottle 330mL",
+    "price": {
+     "current": 7.5,
+     "normal": 7.5,
+     "acrossAnySix": 0,
+     "memberOnlyPrice": 0.0
+    },
+    "image": {
+     "thumbnailImage": "/-/media/images/products/generic_bundle.ashx?bc=white&h=240&mw=300&isThumbnail=True&productId=3813708_ea",
+     "heroImage": "/-/media/images/products/generic_bundle.ashx?h=520&productId=3813708_ea",
+     "bundleHeroImage": null
+    },
+    "productUrl": "/beer-and-cider/brookvale-union-ginger-beer-bottle-330ml_3813708?uom=ea",
+    "promotion": {
+     "calloutText": null,
+     "dinkus": null,
+     "catalogue": null
+    },
+    "sellItemId": "3813730"
+   },
+   {
+    "id": "3813708_ctn24",
+    "gtin": "9344844001610",
+    "cartLimit": 5,
+    "productCode": "3813708",
+    "unitOfMeasure": "CTN24",
+    "brand": "Brookvale Union",
+    "productName": "Brookvale Union Ginger Beer Bottle 330mL",
+    "shortName": "Ginger Beer Bottle 330mL",
+    "price": {
+     "current": 98.5,
+     "normal": 98.5,
+     "acrossAnySix": 0,
+     "memberOnlyPrice": 0.0
+    },
+    "image": {
+     "thumbnailImage": "/-/media/images/products/generic_bundle.ashx?bc=white&h=240&mw=300&isThumbnail=True&productId=3813708_ctn24",
+     "heroImage": "/-/media/images/products/generic_bundle.ashx?h=520&productId=3813708_ctn24",
+     "bundleHeroImage": null
+    },
+    "productUrl": "/beer-and-cider/brookvale-union-ginger-beer-bottle-330ml_3813708?uom=CTN24",
+    "promotion": {
+     "calloutText": null,
+     "dinkus": null,
+     "catalogue": null
+    },
+    "sellItemId": "3813708"
+   }
+  ],
+  "error": null,
+  "id": "3813708_ea",
+  "category": "Beer & Cider",
+  "name": "Brookvale Union Ginger Beer Bottle 330mL",
+  "shortName": "Ginger Beer Bottle 330mL",
+  "brand": "Brookvale Union",
+  "isAvailable": false,
+  "volumeMl": 330,
+  "ratings": {
+   "average": 5.0,
+   "total": 2
+  },
+  "promotion": {
+   "calloutText": null,
+   "dinkus": null,
+   "catalogue": null
+  },
+  "price": {
+   "current": 7.5,
+   "normal": 7.5,
+   "acrossAnySix": 0,
+   "memberOnlyPrice": 0
+  },
+  "stock": {
+   "delivery": "In Stock",
+   "clickAndCollect": ""
+  },
+  "image": {
+   "thumbnailImage": "/-/media/images/products/generic_bundle.ashx?bc=white&h=240&mw=300&isThumbnail=True&productId=3813708_ea",
+   "heroImage": "/-/media/images/products/generic_bundle.ashx?h=520&productId=3813708_ea",
+   "bundleHeroImage": null
+  },
+  "imageList": null,
+  "isBundle": false,
+  "packaging": "Bottle",
+  "campaignId": null,
+  "unitOfMeasure": "ea",
+  "unitOfMeasureLabel": "330mL",
+  "cartLimit": 121,
+  "productUrl": "/beer-and-cider/brookvale-union-ginger-beer-bottle-330ml_3813708?uom=ea",
+  "sellItemId": "3813730",
+  "isSponsoredProduct": false
+ },
+ "facets": [],
+ "filters": null,
+ "campaign": {
+  "heading": null,
+  "image": null,
+  "paragraphs": []
+ },
+ "campaigns": null,
+ "redirectUrl": null,
+ "requestId": "76aef789-8f23-4949-b7c9-c47d56bb0f2e",
+ "meta": null,
+ "error": null,
+ "debugQuery": null
+}
