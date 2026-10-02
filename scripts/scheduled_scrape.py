@@ -243,7 +243,7 @@ def scrape_one(*, name, zone, scrape, push, rstate, now, max_pages):
     try:
         for page in raw_pages:
             r = push({
-                "kind": KINDS[name],
+                "kind": result.get("kind") or KINDS[name],
                 # Liquorland prices are per state and its location comes from the payload itself
                 "location": None if name == "liquorland" else location_dict(location),
                 "payload": page,

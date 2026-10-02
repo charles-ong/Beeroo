@@ -74,3 +74,17 @@ harmless descriptor (premium, original, cerveza, alcoholic, classic, best) with
 exactly one candidate on each side. Everything else is left unmerged and listed
 by `python scripts/match_report.py`. Fix pairs permanently in
 `data/match_overrides.csv` (`merge` / `never_merge` rows, SKUs from the report).
+
+## Dan Murphy's: two ways to read the same page
+
+`scrapers/dan_murphys.py` loads the category page in a visible browser and reads
+it one of two ways (`BEEROO_DM_METHOD`, default `auto`):
+
+- **json**: the page's own `POST /apis/ui/Browse` responses (richest: ABV, pack sizes). Ingest kind `dan_murphys_browse`.
+- **cards**: the text of each `shop-product-card` ("$71.99 case (24)", "MEMBER OFFER ... Non-Member: ..."),
+  the approach that worked unblocked from a home connection. Ingest kind `dan_murphys_cards`, parsed by
+  `scrapers/dan_murphys_dom.py`. Used automatically when no Browse response is seen.
+
+Both go through the same store selection (nearest store to the state's postcode) and the same schema; the card
+parser keeps member and non-member prices (flagged), skips in-store-only prices and never guesses a unit count
+or ABV. Neither method helps if the site serves a bot-protection page: that is detected and the scraper backs off.

@@ -1,0 +1,272 @@
+import asyncio
+import copy
+import json
+import re
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from app.main import create_app
+from common.records import Location, PackType, Retailer
+from scrapers import dan_murphys, dan_murphys_dom as dom
+
+F = Path(__file__).parent / "fixtures"
+CARDS = json.loads((F / "dan_murphys_cards.json").read_text())      # real cards, 2026-09 snapshot
+K = "dan_murphys:test"
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+def card(*lines, href="/product/DM_1/test-beer-330ml"):
+    return {"href": href, "lines": list(lines)}
+
+
+def parse(*lines, **kw):
+    return dom.parse_card(card(*lines, **kw), K)
+
+
+def options(p):
+    return sorted((o.pack_type.value, o.units, o.price, o.member_only) for o in p.prices)
+
+
+# ---- real cards ------------------------------------------------------------------
+
+
+def test_every_real_card_parses():
+    products, errors = dom.parse_cards_payload(CARDS, K)
+    assert len(products) == 48 and errors == []
+    assert all(p.listing.retailer == Retailer.DAN_MURPHYS and p.prices for p in products)
+
+
+def by_name(name):
+    products, _ = dom.parse_cards_payload(CARDS, K)
+    return next(p for p in products if p.listing.name == name)
+
+
+def test_case_and_pack_prices():
+    p = by_name("San Miguel Pale Pilsen Bottles 330mL")
+    assert options(p) == [("case", 24, 71.99, False), ("pack", 6, 25.99, False)]
+    assert p.listing.retailer_sku == "587292"                       # DM_ prefix dropped, like the JSON path's Stockcode
+    assert p.listing.url == "https://www.danmurphys.com.au/product/587292/san-miguel-pale-pilsen-bottles-330ml"
+    assert (p.listing.brand, p.listing.unit_volume_ml) == ("San Miguel", 330)
+
+
+def test_member_offer_keeps_both_prices_flagged():
+    p = by_name("Hollandia Lager Bottles 330mL")
+    assert options(p) == [("case", 24, 49.0, True), ("case", 24, 49.95, False)]
+
+
+def test_multibuy_of_packs_is_sized_from_the_packs_own_count():
+    p = by_name("Dab Original German Beer Cans 500mL")             # "$42 for 2 packs", pack (6)
+    assert (PackType.CASE.value, 12, 42.0, True) in options(p)
+
+
+def test_multibuy_of_cases():
+    p = by_name("Heineken Lager Bottles 330mL")                      # "$109.90 for 2 cases", case (24)
+    assert ("case", 48, 109.9, False) in options(p) or ("case", 48, 109.9, True) in options(p)
+
+
+def test_in_store_only_prices_are_not_online_prices():
+    p = by_name("Victoria Bitter Lager Cans 375mL")                  # "$5.99 each (in-store)"
+    assert options(p) == [("case", 30, 67.95, False)]
+
+
+def test_abv_comes_from_the_name_only_never_invented():
+    assert by_name("Miller Dry 3.5% Cans 355mL").listing.abv == 3.5
+    assert by_name("San Miguel Pale Pilsen Bottles 330mL").listing.abv is None
+
+
+# ---- the two text layouts --------------------------------------------------------
+
+
+def merged(lines):
+    """inner_text() layout: "$71.99 case (24)" on one line, "$ 42" collapsed."""
+    text = "\n".join(lines)
+    text = re.sub(r"\$\n(\d)", r"$\1", text)
+    text = re.sub(r"(\$[\d.]+)\n((?:case|pack|each|for )[^\n]*)", r"\1 \2", text)
+    return text.split("\n")
+
+
+def test_inner_text_layout_gives_identical_results():
+    split = dom.parse_cards_payload(CARDS, K)[0]
+    other = dom.parse_cards_payload({"cards": [{**c, "lines": merged(c["lines"])} for c in CARDS["cards"]]}, K)[0]
+    assert [(p.listing.retailer_sku, options(p)) for p in split] == [(p.listing.retailer_sku, options(p)) for p in other]
+
+
+def test_review_noise_and_buttons_are_not_part_of_the_name():
+    p = parse("(116 REVIEWS)", "San Miguel", "Pale Pilsen Bottles 330mL", "$71.99 case (24)", "Add to cart", "Sponsored")
+    assert p.listing.name == "San Miguel Pale Pilsen Bottles 330mL"
+
+
+def test_each_price_uses_the_pack_count_in_the_title():
+    p = parse("Heineken", "24 x 330mL Cans", "$49.99 each")
+    assert options(p) == [("case", 24, 49.99, False)]
+    assert options(parse("La Chouffe", "Ale 750mL", "$19.99 each")) == [("single", 1, 19.99, False)]
+
+
+def test_a_single_name_line_is_still_a_name():
+    assert parse("Foo Beer 330mL", "$20 pack (6)").listing.brand is None
+
+
+# ---- never guess ------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("c,why", [
+    (card("Foo", "Bar 330mL", "$20 pack (6)", href="/beer/all"), "no product link"),
+    (card("$20 pack (6)"), "no product name"),
+    (card("Foo", "Bar 330mL"), "no online prices"),
+    (card("Foo", "Bar 330mL", "$5.99 each (in-store)"), "no online prices"),
+])
+def test_unusable_cards_are_errors_not_guesses(c, why):
+    with pytest.raises(ValueError, match=why):
+        dom.parse_card(c, K)
+
+
+def test_a_price_with_no_unit_count_is_rejected():
+    with pytest.raises(ValueError, match="without a unit count"):
+        parse("Foo", "Bar 330mL", "$20 pack")
+
+
+def test_a_multibuy_that_cannot_be_sized_is_rejected():
+    with pytest.raises(ValueError, match="cannot size"):
+        parse("Foo", "Bar 330mL", "MEMBER OFFER", "$42", "for 2 packs")
+
+
+def test_duplicate_cards_keep_the_first():
+    two = {"cards": [card("Foo", "Bar 330mL", "$20 pack (6)"), card("Foo", "Bar 330mL", "$99 pack (6)")]}
+    products, errors = dom.parse_cards_payload(two, K)
+    assert len(products) == 1 and products[0].prices[0].price == 20 and errors == []
+    assert dom.count_unique(two["cards"]) == 1
+
+
+def test_bad_payloads_are_rejected_not_half_parsed():
+    for bad in ({}, {"cards": "x"}, {"cards": [{}] * (dom.MAX_CARDS + 1)}):
+        with pytest.raises(ValueError):
+            dom.parse_cards_payload(bad, K)
+    products, errors = dom.parse_cards_payload({"cards": ["x", {"href": "/product/1/a", "lines": ["x"] * 99}]}, K)
+    assert products == [] and len(errors) == 2
+
+
+# ---- ingest ------------------------------------------------------------------------
+
+STORE = {"store_id": "1546", "store_name": "Thornleigh", "suburb": "Thornleigh", "state": "NSW", "postcode": "2120"}
+
+
+@pytest.fixture()
+def client(tmp_path, monkeypatch):
+    monkeypatch.setenv("BEEROO_ADMIN_TOKEN", "t" * 32)
+    return TestClient(create_app(str(tmp_path / "t.sqlite3")))
+
+
+def test_cards_are_ingested_like_any_other_page(client):
+    r = client.post("/api/admin/ingest", headers={"X-Admin-Token": "t" * 32},
+                    json={"kind": "dan_murphys_cards", "location": STORE, "payload": CARDS})
+    assert r.status_code == 200 and r.json()["products"] == 48 and r.json()["new_observations"] > 48
+
+
+def test_cards_ingest_needs_a_location_and_a_matching_state(client):
+    h = {"X-Admin-Token": "t" * 32}
+    assert client.post("/api/admin/ingest", headers=h, json={"kind": "dan_murphys_cards", "payload": CARDS}).status_code == 422
+    wrong = {**STORE, "state": "VIC"}
+    assert client.post("/api/admin/ingest", headers=h,
+                       json={"kind": "dan_murphys_cards", "location": wrong, "payload": CARDS}).status_code == 422
+
+
+def test_garbage_cards_are_rejected_as_a_format_change(client):
+    junk = {"cards": [card("Foo", "Bar", "no prices here")] * 10}
+    r = client.post("/api/admin/ingest", headers={"X-Admin-Token": "t" * 32},
+                    json={"kind": "dan_murphys_cards", "location": STORE, "payload": junk})
+    assert r.status_code == 422
+
+
+# ---- the browser driver picks cards when the page's JSON isn't seen -------------------
+
+
+class FakePage:
+    def __init__(self, cards):
+        self.cards, self.handlers = cards, []
+
+    def on(self, event, handler):
+        self.handlers.append(handler)
+
+    async def evaluate(self, js):
+        assert "shop-product-card" in js
+        return self.cards
+
+    async def screenshot(self, **kw):
+        pass
+
+
+LOCATION = Location(retailer=Retailer.DAN_MURPHYS, store_id="1546", store_name="Thornleigh",
+                    suburb="Thornleigh", state="NSW", postcode="2120")
+
+
+@pytest.fixture()
+def stubbed(monkeypatch):
+    calls = []
+
+    async def noop(*a, **k):
+        calls.append("open")
+
+    async def select(*a, **k):
+        return LOCATION
+
+    async def more_cards(*a, **k):
+        calls.append("cards")
+
+    async def more_pages(*a, **k):
+        calls.append("pages")
+
+    monkeypatch.setattr(dan_murphys, "open_category", noop)
+    monkeypatch.setattr(dan_murphys, "select_location", select)
+    monkeypatch.setattr(dan_murphys, "load_all_cards", more_cards)
+    monkeypatch.setattr(dan_murphys, "load_all_pages", more_pages)
+    monkeypatch.delenv("BEEROO_DM_METHOD", raising=False)
+    return calls
+
+
+def test_no_json_means_the_cards_are_read_as_text(stubbed):
+    raw = []
+    location, products, errors, total, extra = run(
+        dan_murphys.scrape(FakePage(CARDS["cards"]), "2120", raw_pages=raw))
+    assert (len(products), errors, total, extra) == (48, [], 48, {"kind": "dan_murphys_cards"})
+    assert raw == [{"cards": CARDS["cards"]}] and "cards" in stubbed and "pages" not in stubbed
+    assert location.location_key == LOCATION.location_key
+
+
+def test_cards_scrape_result_ingests_and_counts_as_complete(stubbed, tmp_path):
+    from app import ingest
+    from common import db
+    raw = []
+    _, products, errors, total, extra = run(dan_murphys.scrape(FakePage(CARDS["cards"]), "2120", raw_pages=raw))
+    body = ingest.IngestIn.model_validate({"kind": extra["kind"], "location": STORE, "payload": raw[0]})
+    result = ingest.ingest_trusted(db.connect(str(tmp_path / "x.sqlite3")), body)
+    assert result["products"] == len(products) == total
+
+
+def test_a_seen_json_page_wins_in_auto_mode(stubbed, monkeypatch):
+    browse = json.loads((F / "dan_murphys_browse_page1.json").read_text())
+    original = dan_murphys.BrowseCollector
+
+    class Seen(original):
+        def __init__(self):
+            super().__init__()
+            self.pages = {1: browse}
+            self.total = 24
+
+    monkeypatch.setattr(dan_murphys, "BrowseCollector", Seen)
+    raw = []
+    result = run(dan_murphys.scrape(FakePage(CARDS["cards"]), "2120", raw_pages=raw))
+    assert len(result) == 4 and len(result[1]) == 24            # JSON path: no "kind" override
+    assert raw == [browse] and "pages" in stubbed and "cards" not in stubbed
+
+
+def test_cards_mode_ignores_json_and_json_mode_needs_it(stubbed, monkeypatch):
+    monkeypatch.setenv("BEEROO_DM_METHOD", "cards")
+    assert run(dan_murphys.scrape(FakePage(CARDS["cards"]), "2120", raw_pages=[]))[4] == {"kind": "dan_murphys_cards"}
+    monkeypatch.setenv("BEEROO_DM_METHOD", "nonsense")
+    with pytest.raises(ValueError):
+        run(dan_murphys.scrape(FakePage(CARDS["cards"]), "2120", raw_pages=[]))

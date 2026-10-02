@@ -11,10 +11,11 @@ from common import db
 from common.pipeline import run_matching
 from common.postcodes import state_for_postcode
 from common.records import Location, Retailer
-from scrapers import bws, endeavour, liquorland
+from scrapers import bws, dan_murphys_dom, endeavour, liquorland
 
 KINDS = {
     "dan_murphys_browse": Retailer.DAN_MURPHYS,
+    "dan_murphys_cards": Retailer.DAN_MURPHYS,
     "bws_products": Retailer.BWS,
     "liquorland_products": Retailer.LIQUORLAND,
 }
@@ -67,6 +68,8 @@ def parse_payload(kind, payload, location, now):
     key = location.location_key
     if kind == "dan_murphys_browse":
         return endeavour.parse_browse_payload(payload, key, now, Retailer.DAN_MURPHYS, endeavour.DM_BASE_URL)
+    if kind == "dan_murphys_cards":
+        return dan_murphys_dom.parse_cards_payload(payload, key, now)
     if kind == "bws_products":
         return bws.parse_bws_payload(payload, key, now)
     return liquorland.parse_liquorland_payload(payload, key, now)
@@ -82,7 +85,7 @@ def drift_share(errors):
 
 
 class IngestIn(BaseModel):
-    kind: Literal["dan_murphys_browse", "bws_products", "liquorland_products"]
+    kind: Literal["dan_murphys_browse", "dan_murphys_cards", "bws_products", "liquorland_products"]
     location: Optional[LocationIn] = None
     payload: dict
     observed_at: Optional[datetime] = None

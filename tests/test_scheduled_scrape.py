@@ -538,3 +538,17 @@ def test_cli_clear_backoff_then_runs_that_retailer(tmp_path, monkeypatch):
 def test_cli_rejects_an_unknown_retailer_for_clear_backoff():
     with pytest.raises(SystemExit):
         ss.main(["--clear-backoff", "woolworths"])
+
+
+# ---- a scrape can say which kind of page it hands over -------------------------------
+
+
+def test_a_scrape_result_can_override_the_ingest_kind(state):
+    base = fake("dan_murphys")
+
+    async def cards(postcode, max_pages):
+        return {**await base(postcode, max_pages), "kind": "dan_murphys_cards"}
+    _, results, pushed = go(state, {"dan_murphys": cards}, zone="NSW")
+    assert results[0]["status"] == "ok" and [b["kind"] for b in pushed] == ["dan_murphys_cards"]
+    _, _, normal = go(state, {"dan_murphys": base}, zone="VIC")
+    assert [b["kind"] for b in normal] == ["dan_murphys_browse"]

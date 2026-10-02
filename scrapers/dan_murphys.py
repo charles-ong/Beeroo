@@ -8,6 +8,7 @@ through the site's own store selector.
 """
 import asyncio
 import json
+import os
 import random
 import re
 from urllib.parse import urlsplit
@@ -15,6 +16,7 @@ from urllib.parse import urlsplit
 from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from common.records import Location, Retailer, utcnow
+from scrapers import dan_murphys_dom
 from scrapers.endeavour import (  # noqa: F401  (re-exported for callers/tests)
     parse_browse_payload,
     parse_prices,
@@ -109,7 +111,12 @@ async def open_category(page, collector):
         await collector.wait_for_new_page(30)
     except asyncio.TimeoutError:
         await raise_if_blocked(page)
-        raise RuntimeError("category page loaded but no Browse response seen")
+        # No JSON seen: fine if the cards are on the page (they are read as text instead).
+        try:
+            await page.locator("shop-product-card").first.wait_for(state="attached", timeout=30000)
+        except PlaywrightTimeoutError:
+            await raise_if_blocked(page)
+            raise RuntimeError("category page loaded but no Browse response or product cards seen")
 
 
 def location_from_preferences(preferences):
@@ -191,6 +198,45 @@ async def load_all_pages(page, collector, max_pages=MAX_PAGES):
             break
 
 
+_CARDS_JS = """() => [...document.querySelectorAll('shop-product-card')].map(card => {
+  const link = card.querySelector('a[href*="/product/"]');
+  return {href: link ? link.getAttribute('href') : (card.getAttribute('data-url') || ''),
+          lines: card.innerText.split('\\n')};
+})"""
+
+
+async def read_cards(page):
+    """What a visitor sees on each product card: link + text lines."""
+    return await page.evaluate(_CARDS_JS)
+
+
+async def load_all_cards(page, max_clicks=100):
+    """Click "Load more" like a user until the card count stops growing."""
+    cards = page.locator("shop-product-card")
+    button = page.locator(".infinite-loader__load-more-button")
+    previous = 0
+
+    for _ in range(max_clicks):
+        current = await cards.count()
+        if current == previous:
+            await page.wait_for_timeout(1000)
+            current = await cards.count()
+            if current == previous:
+                break
+        previous = current
+
+        if not await button.count() or not await button.is_visible():
+            break
+
+        await asyncio.sleep(random.uniform(*PAUSE_RANGE_S))
+        try:
+            await button.scroll_into_view_if_needed()
+            await button.click()
+            await page.wait_for_timeout(1500)
+        except Exception:  # noqa: BLE001 - the button can vanish at the end of the list
+            break
+
+
 def collect_products(collector, location_key, observed_at=None):
     observed_at = observed_at or utcnow()
     by_sku, errors = {}, []
@@ -231,6 +277,20 @@ async def scrape(page, postcode, max_pages=MAX_PAGES, raw_pages=None):
 
     if location is None:
         raise RuntimeError("could not determine the active store")
+
+    # BEEROO_DM_METHOD: auto (the page's JSON if seen, else the cards' text), json, or cards
+    method = os.environ.get("BEEROO_DM_METHOD", "auto")
+    if method not in {"auto", "json", "cards"}:
+        raise ValueError("BEEROO_DM_METHOD must be auto, json or cards")
+
+    if method == "cards" or (method == "auto" and not collector.pages):
+        await load_all_cards(page)
+        cards = await read_cards(page)
+        products, errors = dan_murphys_dom.parse_cards_payload({"cards": cards}, location.location_key)
+        if raw_pages is not None:
+            raw_pages.append({"cards": cards})
+        return (location, products, errors, dan_murphys_dom.count_unique(cards),
+                {"kind": "dan_murphys_cards"})
 
     await load_all_pages(page, collector, max_pages)
     products, errors = collect_products(collector, location.location_key)
