@@ -104,6 +104,73 @@ def cards_from_json(text):
     return cards
 
 
+def unrtf(text):
+    """The plain text of a TextEdit Rich Text file (what you get by pasting into TextEdit and saving).
+    Only the escapes TextEdit writes are handled; anything else is left alone."""
+    start = re.search(r"\\cf0\s", text)
+    body = text[start.end():] if start else text
+    if "}" in body:
+        body = body[: body.rindex("}")]                   # the RTF document's closing brace
+    out, i, fallback = [], 0, 1
+    while i < len(body):
+        c = body[i]
+        if c != "\\":
+            out.append(c)
+            i += 1
+            continue
+        nxt = body[i + 1: i + 2]
+        if nxt == "'" and re.fullmatch(r"[0-9a-fA-F]{2}", body[i + 2: i + 4]):
+            out.append(bytes([int(body[i + 2: i + 4], 16)]).decode("cp1252", "replace"))
+            i += 4
+        elif nxt in ("{", "}", "\\"):
+            out.append(nxt)
+            i += 2
+        elif nxt == "\n":
+            out.append("\n")
+            i += 2
+        elif (m := re.match(r"\\uc(\d+) ?", body[i:])):
+            fallback = int(m.group(1))                    # characters to skip after each \uN
+            i += m.end()
+        elif (m := re.match(r"\\u(-?\d+) ?", body[i:])):
+            n = int(m.group(1))
+            out.append(chr(n if n >= 0 else n + 65536))
+            i += m.end() + fallback
+        elif (m := re.match(r"\\(par|line)\b ?", body[i:])):
+            out.append("\n")
+            i += m.end()
+        elif (m := re.match(r"\\tab\b ?", body[i:])):
+            out.append("\t")
+            i += m.end()
+        else:
+            i += 1
+    result = "".join(out).strip()
+    # TextEdit's "smart quotes" turn the first straight quote into a curly one
+    return re.sub(r'^([{\[])[\u201c\u201d]', r'\1"', result)
+
+
+class _TextOnly(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts, self._skip = [], 0
+
+    def handle_starttag(self, tag, attrs):
+        self._skip += tag in ("style", "script", "title", "head")
+
+    def handle_endtag(self, tag):
+        if tag in ("style", "script", "title", "head") and self._skip:
+            self._skip -= 1
+
+    def handle_data(self, data):
+        if not self._skip:
+            self.parts.append(data)
+
+
+def text_of_html(text):
+    parser = _TextOnly()
+    parser.feed(text)
+    return "".join(parser.parts).strip()
+
+
 def read_clipboard():
     """The clipboard's text (macOS pbpaste)."""
     try:
@@ -122,14 +189,23 @@ def read_cards(path):
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError as e:
         raise ImportProblem(f"cannot read {path}: {e}")
-    if text.lstrip().startswith("{\\rtf"):
-        raise ImportProblem(f"{path} was saved as Rich Text (TextEdit does that), which breaks the data. "
-                            "Use --clipboard instead (see docs/DAN_MURPHYS_MANUAL.md), or in TextEdit choose "
-                            "Format > Make Plain Text before saving.")
-    return cards_from_text(text, path)
+    return cards_from_text(text, str(path))
 
 
 def cards_from_text(text, source="the input"):
+    """JSON from the snippet (also when a text editor wrapped it as Rich Text or HTML), or a saved page."""
+    if text.lstrip().startswith("{\\rtf"):
+        text = unrtf(text)
+    elif "<" in text and not text.lstrip().startswith(("{", "[")):
+        cards = cards_from_html(text)
+        if cards:
+            return cards
+        plain = text_of_html(text)                         # JSON pasted into a text editor and saved as HTML
+        if plain.startswith(("{", "[", "{\u201c")):
+            text = re.sub(r'^([{\[])[\u201c\u201d]', r'\1"', plain)
+        else:
+            raise ImportProblem(f"{source} has no product cards. Browsers usually save a page's original source, "
+                                "not the products you see loaded. Use the console snippet and --clipboard instead.")
     if text.lstrip().startswith(("{", "[")):
         try:
             return cards_from_json(text)
@@ -137,9 +213,8 @@ def cards_from_text(text, source="the input"):
             raise ImportProblem(f"{source} is not valid JSON: {e}. If you pasted it into a text editor, "
                                 "it may have changed the quotes: use --clipboard instead.")
     cards = cards_from_html(text)
-    if not cards and "<" in text:
-        raise ImportProblem(f"{source} has no product cards. Browsers usually save a page's original source, "
-                            "not the products you see loaded. Use the console snippet and --clipboard instead.")
+    if not cards:
+        raise ImportProblem(f"{source} has no product cards. Use the console snippet and --clipboard instead.")
     return cards
 
 

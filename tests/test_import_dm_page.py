@@ -191,11 +191,54 @@ def test_imported_prices_show_up_for_that_state_only(no_env, tmp_path):
 # ---- the two things that went wrong on the first real try -------------------------------
 
 
-def test_a_file_saved_as_rich_text_is_explained_not_misread(tmp_path):
-    rtf = tmp_path / "dm.json"
-    rtf.write_text('{\\rtf1\\ansi\\ansicpg1252\\cocoartf2822\n\\f0\\fs24 \\cf0 \\{\\\'93cards":[]\\}}')
-    with pytest.raises(imp.ImportProblem, match="Rich Text.*--clipboard"):
-        imp.read_cards(rtf)
+def as_textedit_rtf(text):
+    """What TextEdit writes when JSON is pasted in and saved: Rich Text, with the first quote made curly."""
+    out = []
+    for ch in text:
+        if ch in "\\{}":
+            out.append("\\" + ch)
+        elif ord(ch) > 255:
+            out.append("\\u%d " % ord(ch))
+        elif ord(ch) > 127:
+            out.append("\\'%02x" % ord(ch.encode("cp1252")))
+        else:
+            out.append(ch)
+    body = "".join(out).replace('\\{"', "\\{\\'93", 1)
+    return ("{\\rtf1\\ansi\\ansicpg1252\\cocoartf2822\n\\cocoatextscaling0{\\fonttbl\\f0\\fswiss Helvetica;}\n"
+            "\\paperw11900\\margl1440\n\\f0\\fs24 \\cf0 \\uc0" + body + "}")
+
+
+def as_textedit_html(text):
+    from html import escape
+    return ('<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">\n<html>\n<head>\n'
+            '<meta name="Generator" content="Cocoa HTML Writer">\n<title></title>\n<style type="text/css">p.p1 {margin: 0}</style>\n'
+            '</head>\n<body>\n<p class="p1">' + escape(text, quote=False) + "</p>\n</body>\n</html>\n")
+
+
+def test_json_pasted_into_textedit_and_saved_as_rich_text_is_recovered(tmp_path):
+    cards = [{"href": "/product/DM_1/caf\u00e9-stout-330ml", "lines": ["Br\u00fcder", "Stout \u2013 330mL {x}", "$20 pack (6)"]}]
+    f = tmp_path / "dm.json"
+    f.write_text(as_textedit_rtf(json.dumps({"cards": cards}, ensure_ascii=False)), encoding="utf-8")
+    assert imp.read_cards(f) == cards
+
+
+def test_the_whole_real_page_survives_the_rich_text_round_trip(tmp_path):
+    f = tmp_path / "dm.json"
+    f.write_text(as_textedit_rtf(json.dumps(CARDS, ensure_ascii=False)), encoding="utf-8")
+    assert imp.read_cards(f) == CARDS["cards"]
+
+
+def test_json_saved_by_textedit_as_html_is_recovered(tmp_path):
+    f = tmp_path / "dm.json"
+    f.write_text(as_textedit_html(json.dumps(CARDS, ensure_ascii=False)), encoding="utf-8")
+    assert imp.read_cards(f) == CARDS["cards"]
+
+
+def test_a_broken_rich_text_file_is_still_an_error(tmp_path):
+    f = tmp_path / "dm.json"
+    f.write_text("{\\rtf1\\ansi \\f0 \\cf0 not json at all}")
+    with pytest.raises(imp.ImportProblem, match="no product cards"):
+        imp.read_cards(f)
 
 
 def test_a_saved_page_without_the_loaded_products_is_explained(tmp_path):
