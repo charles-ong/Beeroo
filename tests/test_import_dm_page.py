@@ -186,3 +186,53 @@ def test_imported_prices_show_up_for_that_state_only(no_env, tmp_path):
     conn = db.connect(str(tmp_path / "x.sqlite3"))
     assert resolve_locations(conn, "NSW")["retailers"]["dan_murphys"]["state"] == "NSW"
     assert resolve_locations(conn, "VIC")["retailers"]["dan_murphys"] is None
+
+
+# ---- the two things that went wrong on the first real try -------------------------------
+
+
+def test_a_file_saved_as_rich_text_is_explained_not_misread(tmp_path):
+    rtf = tmp_path / "dm.json"
+    rtf.write_text('{\\rtf1\\ansi\\ansicpg1252\\cocoartf2822\n\\f0\\fs24 \\cf0 \\{\\\'93cards":[]\\}}')
+    with pytest.raises(imp.ImportProblem, match="Rich Text.*--clipboard"):
+        imp.read_cards(rtf)
+
+
+def test_a_saved_page_without_the_loaded_products_is_explained(tmp_path):
+    skeleton = tmp_path / "dm.html"
+    skeleton.write_text("<!doctype html><html><head><title>Beer</title></head><body><app-root></app-root></body></html>")
+    with pytest.raises(imp.ImportProblem, match="no product cards.*--clipboard"):
+        imp.read_cards(skeleton)
+
+
+def test_invalid_json_points_at_the_clipboard_route(tmp_path):
+    bad = tmp_path / "dm.json"
+    bad.write_text('{“cards":[]}')               # a text editor's curly quote
+    with pytest.raises(imp.ImportProblem, match="quotes.*--clipboard"):
+        imp.read_cards(bad)
+
+
+def test_clipboard_import(no_env, tmp_path, monkeypatch, capsys):
+    clip = json.dumps(CARDS)
+    monkeypatch.setattr(imp.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout=clip, stderr=""))
+    assert imp.main(["--clipboard", "--state", "NSW", "--db", str(tmp_path / "x.sqlite3")]) == 0
+    assert "48 products found" in capsys.readouterr().out
+    assert db.connect(str(tmp_path / "x.sqlite3")).execute("SELECT COUNT(*) FROM listings").fetchone()[0] == 48
+
+
+def test_clipboard_problems_are_explained(no_env, monkeypatch, capsys):
+    monkeypatch.setattr(imp.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="  ", stderr=""))
+    assert imp.main(["--clipboard", "--state", "NSW"]) == 1 and "clipboard is empty" in capsys.readouterr().err
+
+    def missing(*a, **k):
+        raise FileNotFoundError("pbpaste")
+    monkeypatch.setattr(imp.subprocess, "run", missing)
+    assert imp.main(["--clipboard", "--state", "NSW"]) == 1 and "macOS only" in capsys.readouterr().err
+
+
+def test_exactly_one_input_is_required(no_env, tmp_path, capsys):
+    assert imp.main(["--state", "NSW"]) == 1
+    f = tmp_path / "a.json"
+    f.write_text(json.dumps(CARDS))
+    assert imp.main([str(f), "--clipboard", "--state", "NSW"]) == 1
+    assert "either a file or --clipboard" in capsys.readouterr().err

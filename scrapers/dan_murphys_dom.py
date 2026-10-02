@@ -35,7 +35,7 @@ _TOKEN = re.compile(
     | (?P<nonmember>NON-MEMBER\s*:?)
     | \$\s*(?P<price>\d+(?:\s*\.\s*\d{{1,2}})?)\s*
       (?: for\s+(?P<mq>\d+)\s+(?P<mu>cases?|packs?|bottles?|cans?|blocks?|cartons?)
-        | (?P<unit>{_UNIT})(?:\s*\((?P<paren>\d+|in-store)\))? )?
+        | (?P<unit>{_UNIT})(?:\s*\(+\s*(?P<paren>\d+|in-store)\s*\)+)? )?
     """,
     re.I | re.X,
 )
@@ -92,18 +92,20 @@ def _sibling_size(options, unit):
 
 
 def parse_prices(lines, name, location_key, observed_at):
-    """Online-purchasable price options for one card. Raises ValueError for a
-    price phrase we can't turn into a unit count (we never guess)."""
+    """Online-purchasable price options for one card. An option we can't turn
+    into a unit count is skipped, never guessed; if that leaves nothing, raises
+    ValueError saying why."""
     options = _options(" ".join(lines))
     title = _TITLE_QTY.search(name or "")
-    seen, observations = set(), []
+    seen, observations, problem = set(), [], None
 
     for o in options:
         if o["mq"]:                                     # "$42 for 2 packs"
             kind = _PER_WORD[o["mu"]]
             per = 1 if kind == "one" else _sibling_size(options, "case" if kind == "case" else "pack")
             if not per:
-                raise ValueError(f"cannot size multi-buy '{o['mq']} {o['mu']}'")
+                problem = problem or f"cannot size multi-buy '{o['mq']} {o['mu']}'"
+                continue
             units = o["mq"] * per
             pack_type = PackType.CASE if kind == "case" else pack_type_for_units(units)
         elif o["paren"] == "in-store":                  # not purchasable online
@@ -115,7 +117,8 @@ def parse_prices(lines, name, location_key, observed_at):
             units = int(title.group(1)) if title else 1
             pack_type = pack_type_for_units(units)
         else:
-            raise ValueError("price without a unit count")
+            problem = problem or "price without a unit count"
+            continue
 
         key = (pack_type, units, o["member"])
         if key in seen:
@@ -126,6 +129,8 @@ def parse_prices(lines, name, location_key, observed_at):
             location_key=location_key, observed_at=observed_at,
         ))
 
+    if not observations and problem:
+        raise ValueError(problem)
     return observations
 
 

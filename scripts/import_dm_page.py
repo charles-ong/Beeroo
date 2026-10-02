@@ -22,6 +22,7 @@ import json
 import os
 import re
 import stat
+import subprocess
 import sys
 from datetime import datetime, timezone
 from html.parser import HTMLParser
@@ -103,18 +104,43 @@ def cards_from_json(text):
     return cards
 
 
+def read_clipboard():
+    """The clipboard's text (macOS pbpaste)."""
+    try:
+        proc = subprocess.run(["pbpaste"], capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        raise ImportProblem("cannot read the clipboard here (macOS only): save the snippet's output to a "
+                            "plain-text .json file instead")
+    if not proc.stdout.strip():
+        raise ImportProblem("the clipboard is empty: run the console snippet first")
+    return cards_from_text(proc.stdout, "the clipboard")
+
+
 def read_cards(path):
     path = Path(path)
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
     except OSError as e:
         raise ImportProblem(f"cannot read {path}: {e}")
+    if text.lstrip().startswith("{\\rtf"):
+        raise ImportProblem(f"{path} was saved as Rich Text (TextEdit does that), which breaks the data. "
+                            "Use --clipboard instead (see docs/DAN_MURPHYS_MANUAL.md), or in TextEdit choose "
+                            "Format > Make Plain Text before saving.")
+    return cards_from_text(text, path)
+
+
+def cards_from_text(text, source="the input"):
     if text.lstrip().startswith(("{", "[")):
         try:
             return cards_from_json(text)
         except ValueError as e:
-            raise ImportProblem(f"{path} is not valid JSON: {e}")
-    return cards_from_html(text)
+            raise ImportProblem(f"{source} is not valid JSON: {e}. If you pasted it into a text editor, "
+                                "it may have changed the quotes: use --clipboard instead.")
+    cards = cards_from_html(text)
+    if not cards and "<" in text:
+        raise ImportProblem(f"{source} has no product cards. Browsers usually save a page's original source, "
+                            "not the products you see loaded. Use the console snippet and --clipboard instead.")
+    return cards
 
 
 # --------------------------------------------------------------------------
@@ -153,7 +179,7 @@ def check(body, min_cards=MIN_CARDS, force=False):
         products, errors = dom.parse_cards_payload(body["payload"], loc.location_key)
     except (ValueError, ingest.IngestError) as e:
         raise ImportProblem(f"the page could not be read: {getattr(e, 'message', e)}")
-    if ingest.drift_share(errors) > ingest.DRIFT_ERROR_SHARE:
+    if ingest.drift_share(errors, len(cards)) > ingest.DRIFT_ERROR_SHARE:
         sample = "; ".join(f"{i}: {why}" for i, why in errors[:3])
         raise ImportProblem(f"too many cards could not be read ({len(errors)} of {len(cards)}; {sample}). "
                            "The page layout may have changed.")
@@ -198,7 +224,8 @@ def send(body, local=False, db_path=DEFAULT_DB, outbox=OUTBOX, environ=os.enviro
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("file", help="the console-snippet JSON, or the saved page (.html)")
+    ap.add_argument("file", nargs="?", help="the console-snippet JSON saved as plain text (or --clipboard instead)")
+    ap.add_argument("--clipboard", action="store_true", help="read what the console snippet copied (macOS): no file needed")
     ap.add_argument("--state", required=True, help=f"which state/territory the store is set to ({', '.join(STATES)})")
     ap.add_argument("--store-id", help="the store's id, if you know it (default: manual_<state>)")
     ap.add_argument("--store-name")
@@ -212,9 +239,12 @@ def main(argv=None):
 
     try:
         load_env_file()
+        if bool(args.file) == args.clipboard:
+            raise ImportProblem("give either a file or --clipboard")
         observed = (datetime.fromisoformat(args.observed_at) if args.observed_at
+                    else datetime.now(timezone.utc) if args.clipboard
                     else datetime.fromtimestamp(Path(args.file).stat().st_mtime, timezone.utc))
-        body = build_body(read_cards(args.file), args.state, observed,
+        body = build_body(read_clipboard() if args.clipboard else read_cards(args.file), args.state, observed,
                           {"store_id": args.store_id, "store_name": args.store_name, "suburb": args.suburb})
         products, errors, unique = check(body, force=args.force)
         prices = sum(len(p.prices) for p in products)

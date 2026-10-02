@@ -75,13 +75,19 @@ def parse_payload(kind, payload, location, now):
     return liquorland.parse_liquorland_payload(payload, key, now)
 
 
-def drift_share(errors):
-    """Share of parse errors that are NOT benign 'not buyable' reasons."""
-    total = len(errors)
+def drift_share(errors, total=None):
+    """Share of parse errors that are NOT benign 'not buyable' reasons. With
+    `total` (how many items there were), the share of ALL items that failed
+    for a real reason: a handful of odd cards must not sink a whole page."""
+    total = total or len(errors)
     if not total:
         return 0.0
     bad = sum(1 for _, reason in errors if reason not in BENIGN_ERRORS)
     return bad / total
+
+
+def page_size(kind, payload):
+    return len(payload.get("cards") or []) if kind == "dan_murphys_cards" and isinstance(payload.get("cards"), list) else None
 
 
 class IngestIn(BaseModel):
@@ -109,7 +115,7 @@ def ingest_trusted(conn, body, now=None):
     except Exception:
         raise IngestError(422, "parse: payload is not in the expected format")
 
-    if drift_share(errors) > DRIFT_ERROR_SHARE:
+    if drift_share(errors, page_size(body.kind, body.payload)) > DRIFT_ERROR_SHARE:
         raise IngestError(422, "parse: too many unrecognised items (format may have changed)")
     if not products:
         raise IngestError(422, "parse: no usable products in payload")

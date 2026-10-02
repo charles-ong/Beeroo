@@ -270,3 +270,35 @@ def test_cards_mode_ignores_json_and_json_mode_needs_it(stubbed, monkeypatch):
     monkeypatch.setenv("BEEROO_DM_METHOD", "nonsense")
     with pytest.raises(ValueError):
         run(dan_murphys.scrape(FakePage(CARDS["cards"]), "2120", raw_pages=[]))
+
+
+# ---- layout quirks seen on the live page (2026-10 import) ------------------------------
+
+
+def test_odd_spacing_and_typos_in_the_unit_count_are_tolerated():
+    p = parse("Stone & Wood", "Stone Beer Cans 375mL", "$75.99 case(16)", "$24.99 pack((4)", "ADD TO CART ")
+    assert options(p) == [("case", 16, 75.99, False), ("pack", 4, 24.99, False)]
+    q = parse("Wrexham", "Lager 4.0 Bottles 330mL", "$21.99 pack (6)", "$64.99 case( 24)", "DELIVERY ONLY")
+    assert options(q) == [("case", 24, 64.99, False), ("pack", 6, 21.99, False)]
+
+
+def test_one_unsizable_option_does_not_cost_the_card_its_other_prices():
+    p = parse("Foo", "Bar 330mL", "$20 pack (6)", "$99 per kit")
+    assert options(p) == [("pack", 6, 20.0, False)]
+    with pytest.raises(ValueError, match="without a unit count"):
+        parse("Coopers", "DIY Home Brewing Kit", "$149 per kit")
+
+
+def test_a_few_odd_cards_do_not_sink_a_whole_page(client):
+    odd = [card("Coopers", "DIY Home Brewing Kit", "$149 per kit", href=f"/product/DM_{i}/kit") for i in range(5)]
+    page = {"cards": CARDS["cards"] + odd + [{"href": "", "lines": [""]}]}
+    r = client.post("/api/admin/ingest", headers={"X-Admin-Token": "t" * 32},
+                    json={"kind": "dan_murphys_cards", "location": STORE, "payload": page})
+    assert r.status_code == 200 and r.json()["products"] == 48 and r.json()["skipped"] == 6
+
+
+def test_but_a_page_where_most_cards_fail_is_still_rejected_as_a_format_change(client):
+    broken = [card("Foo", "Bar", "$20 per kit", href=f"/product/DM_{i}/x") for i in range(40)]
+    r = client.post("/api/admin/ingest", headers={"X-Admin-Token": "t" * 32},
+                    json={"kind": "dan_murphys_cards", "location": STORE, "payload": {"cards": CARDS["cards"][:10] + broken}})
+    assert r.status_code == 422

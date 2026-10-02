@@ -11,20 +11,24 @@ visit to their site is involved. A few minutes per state, probably weekly.
    (the same ones the rest of the site uses). Pick the nearest store it offers.
 2. **Open** <https://www.danmurphys.com.au/beer/all> and click **Load more** until the button disappears
    (several hundred products). Scroll to the bottom to check.
-3. **Save it**, either way:
-   - **Console snippet (most reliable).** Open the browser's developer console (Chrome: View → Developer →
-     JavaScript Console), paste this and press Enter. It copies the product cards to your clipboard; paste them into a
-     new file such as `dm-nsw.json`:
-     ```js
-     copy(JSON.stringify({cards:[...document.querySelectorAll('shop-product-card')].map(c=>{const a=c.querySelector('a[href*="/product/"]');return {href:a?a.getAttribute('href'):'',lines:c.innerText.split('\n')}})}))
-     ```
-   - **Save the page.** File → Save Page As → **Webpage, Complete** (not "HTML only"). If the importer says no
-     product cards were found, use the console snippet instead.
-4. **Import it**, naming the state you set in step 1:
+3. **Copy the products.** Open the browser's developer console (Chrome/Edge: View → Developer → JavaScript
+   Console), paste this and press Enter. It puts the product cards on your clipboard (nothing visible happens):
+   ```js
+   copy(JSON.stringify({cards:[...document.querySelectorAll('shop-product-card')].map(c=>{const a=c.querySelector('a[href*="/product/"]');return {href:a?a.getAttribute('href'):'',lines:c.innerText.split('\n')}})}))
+   ```
+   (If the console asks you to type `allow pasting` first, do that.)
+4. **Import from the clipboard**, naming the state you set in step 1:
    ```bash
-   .venv/bin/python scripts/import_dm_page.py ~/Downloads/dm-nsw.json --state NSW
+   .venv/bin/python scripts/import_dm_page.py --clipboard --state NSW
    ```
    Add `--dry-run` first to see what it found without sending anything.
+
+**Don't paste it into TextEdit.** TextEdit saves Rich Text and swaps straight quotes for curly ones, which breaks
+the data. That is why `--clipboard` exists. If you want a file, use a plain-text editor (or TextEdit's
+Format → Make Plain Text with smart quotes off) and pass the file instead of `--clipboard`.
+
+**"Save Page As" usually doesn't work.** Browsers save the page's original source, not the products you see after
+"Load more", so the file has no product cards (the importer says so). It reads such a file only if it does contain them.
 
 ## What it does
 
