@@ -30,3 +30,11 @@ def normalise_state(value):
     """'nsw ' -> 'NSW'; None if it isn't a known state/territory code."""
     code = str(value or "").strip().upper()
     return code if code in STATES else None
+
+
+# Retailers that have no stores at all in a state/territory, so "no prices yet" would be wrong.
+NO_STORES = {("dan_murphys", "NT")}
+
+
+def has_stores(retailer, code):
+    return (retailer, code) not in NO_STORES

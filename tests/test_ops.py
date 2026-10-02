@@ -281,3 +281,5 @@ def test_freshness_report(tmp_path):
     assert got[("Australian Capital Territory (ACT)", "liquorland")][0] == "STALE"
     assert got[("New South Wales (NSW)", "dan_murphys")] == ("MISSING", None)
     assert len(got) == 24                                                      # 8 states and territories x 3 retailers
+    assert got[("Northern Territory (NT)", "dan_murphys")] == ("n/a", None)    # Dan Murphy's has no NT stores
+    assert got[("Northern Territory (NT)", "bws")][0] == "MISSING"

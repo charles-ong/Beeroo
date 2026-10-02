@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from common import db  # noqa: E402
-from common.states import STATES  # noqa: E402
+from common.states import STATES, has_stores  # noqa: E402
 
 RETAILERS = {"bws": "BWS", "liquorland": "Liquorland", "dan_murphys": "Dan Murphy's"}
 
@@ -32,6 +32,9 @@ def freshness(conn, now=None, max_age_days=3):
     for code, info in STATES.items():
         label = f"{info['name']} ({code})"
         for key in RETAILERS:
+            if not has_stores(key, code):
+                rows.append((label, key, "n/a", None))          # no stores there: nothing to be fresh
+                continue
             seen = latest.get((key, code))
             if seen is None:
                 rows.append((label, key, "MISSING", None))
@@ -53,8 +56,9 @@ def main():
     print(f"{'State':<36}{'Retailer':<14}{'Status':<9}Age")
     for label, key, status, age in rows:
         print(f"{label:<36}{RETAILERS[key]:<14}{status:<9}{'' if age is None else f'{age} days'}")
-    bad = sum(1 for r in rows if r[2] != "ok")
-    print(f"\n{len(rows) - bad} of {len(rows)} state/retailer combinations are fresh")
+    applicable = [r for r in rows if r[2] != "n/a"]
+    bad = sum(1 for r in applicable if r[2] != "ok")
+    print(f"\n{len(applicable) - bad} of {len(applicable)} state/retailer combinations are fresh")
 
 
 if __name__ == "__main__":

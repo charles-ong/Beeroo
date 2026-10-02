@@ -4,7 +4,7 @@ import statistics
 from datetime import datetime, timezone
 
 from common.db import get_meta
-from common.states import STATES, normalise_state
+from common.states import STATES, has_stores, normalise_state
 from common.value import value_metrics
 
 RETAILERS = ["dan_murphys", "bws", "liquorland"]
@@ -64,6 +64,11 @@ def resolve_locations(conn, state):
 
     for retailer in RETAILERS:
         candidates = [r for r in rows if r["retailer"] == retailer]
+
+        if not has_stores(retailer, code):
+            chosen[retailer] = None
+            notices.append(f"{RETAILER_NAMES[retailer]} has no stores in {STATES[code]['name']}.")
+            continue
 
         if not candidates:
             chosen[retailer] = None

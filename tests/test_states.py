@@ -30,3 +30,19 @@ def test_state_list_is_sorted_by_name_for_the_dropdown():
                                             (None, None), ("2100", None), ("XX", None), ("N S W", None)])
 def test_normalise_state(value, expected):
     assert normalise_state(value) == expected
+
+
+# ---- retailers with no stores in a state ---------------------------------------
+
+
+def test_dan_murphys_has_no_stores_in_the_nt_and_the_api_says_so_plainly(tmp_path):
+    from app.queries import resolve_locations
+    from common import db
+    from common.states import has_stores
+
+    assert not has_stores("dan_murphys", "NT") and has_stores("dan_murphys", "NSW") and has_stores("bws", "NT")
+    conn = db.connect(str(tmp_path / "x.sqlite3"))
+    notices = resolve_locations(conn, "NT")["notices"]
+    assert "Dan Murphy's has no stores in Northern Territory." in notices
+    assert "No BWS prices for Northern Territory yet." in notices          # a real gap still says "yet"
+    assert not any("Dan Murphy's prices" in n for n in notices)

@@ -4,6 +4,9 @@ Dan Murphy's serves bot protection to our automated scraper, and we don't try to
 add its prices yourself: browse the page in your normal browser, save what you see, and import it. No automated
 visit to their site is involved. A few minutes per state, probably weekly.
 
+Dan Murphy's has no stores in the Northern Territory, so there is nothing to import for NT (the site says so, and
+the freshness report marks it n/a). The other seven states and territories are covered.
+
 ## Each time (per state)
 
 1. **Set the store.** On danmurphys.com.au choose pick-up/delivery and enter the state's pricing postcode:
