@@ -38,7 +38,7 @@ def site(tmp_path_factory):
 # ---- structure --------------------------------------------------------------
 
 
-def test_export_writes_manifest_variants_and_details(site):
+def test_export_writes_manifest_one_file_per_state_and_details(site):
     out, stats = site["out"], site["stats"]
     manifest = json.loads((out / "data" / "manifest.json").read_text())
     # only states with data of their own are exported: the demo data covers NSW (Dan Murphy's), ACT and WA
@@ -46,16 +46,15 @@ def test_export_writes_manifest_variants_and_details(site):
     assert [s["code"] for s in manifest["all_states"]] == ["ACT", "NSW", "NT", "QLD", "SA", "TAS", "VIC", "WA"]
     assert {s["code"]: s["postcode"] for s in manifest["all_states"]}["NSW"] == "2100"
     for state in manifest["states"]:
-        for member in (0, 1):
-            for pack in ("any", "single", "pack", "case"):
-                assert (out / "data" / state / f"{member}-{pack}.json").exists()
+        assert (out / "data" / state / "products.json").exists()
+        assert len(list((out / "data" / state).glob("*.json"))) == 1          # no per-filter variants any more
     assert stats["files"] > 100
     assert stats["bytes"] / 1e6 < 60
 
 
 def test_every_listed_product_has_a_detail_file_matching_the_server(site):
     out, conn = site["out"], site["conn"]
-    variant = json.loads((out / "data" / "ACT" / "1-any.json").read_text())
+    variant = json.loads((out / "data" / "ACT" / "products.json").read_text())
     assert variant["products"]
     for p in variant["products"][:15]:
         detail = json.loads((out / "data" / "ACT" / "p" / f"{p['id']}.json").read_text())
@@ -90,40 +89,71 @@ def test_nothing_is_exported_for_an_empty_database(tmp_path):
 
 # ---- browser logic matches the server -----------------------------------------
 
-CASES = []
-for (sort, pack, member, q, minr, abv) in itertools.product(
-    ["value", "unit_price", "abv", "name"], [None, "case"], [False, True], ["", "carlton dry"], [1, 2], [(None, None), (4.0, 5.2)],
-):
-    CASES.append({"sort": sort, "pack": pack, "member": member, "q": q, "min_retailers": minr, "abv": abv})
+def make_cases():
+    cases = []
+    for sort, member, q, minr in itertools.product(["value", "unit_price", "abv", "name"], [False, True], ["", "carlton dry"], [1, 2]):
+        cases.append({"sort": sort, "member": member, "q": q, "min_retailers": minr})
+    # the new filters, alone and combined
+    extra = [
+        {"retailers": ["bws"]}, {"retailers": ["bws", "liquorland"]}, {"retailers": ["dan_murphys"]},
+        {"types": ["Lager"]}, {"types": ["IPA", "Pale Ale"]}, {"types": ["Cider", "Ginger Beer"]},
+        {"min_units": 24}, {"max_units": 6}, {"min_units": 4, "max_units": 12}, {"min_units": 24, "max_units": 24}, {"min_units": 40, "max_units": 30},
+        {"min_abv": 4.0, "max_abv": 5.2}, {"min_abv": 3.5}, {"max_abv": 3.5},
+        {"member": False, "min_units": 6, "types": ["Lager"], "retailers": ["liquorland"]},
+        {"member": True, "min_units": 12, "max_units": 30, "min_abv": 4.5, "sort": "unit_price", "min_retailers": 2},
+    ]
+    for e in extra:
+        cases.append({"sort": "value", "member": True, "q": "", "min_retailers": 1, **e})
+    return cases
+
+
+def query_of(c):
+    return {"q": c["q"], "sort": c["sort"], "min_retailers": c["min_retailers"], "include_member": c["member"],
+            "retailers": c.get("retailers"), "types": c.get("types"), "min_units": c.get("min_units"),
+            "max_units": c.get("max_units"), "min_abv": c.get("min_abv"), "max_abv": c.get("max_abv")}
+
+
+def digest(products):
+    """The derived fields the cards show: they must match after the browser recomputes them."""
+    return [[p["id"], p["best_value_retailer"], p["best_unit_price_retailer"],
+             p["min_price_per_standard_drink"], p["min_unit_price"],
+             [[k, len(e["options"]), e["last_updated"], e["stale"],
+               e["best_value"] and e["best_value"]["price"], e["cheapest_unit"] and e["cheapest_unit"]["price"]]
+              for k, e in sorted(p["retailers"].items())]] for p in products]
 
 
 def test_browser_side_filtering_and_sorting_matches_the_server(site):
     if NODE is None:
         pytest.skip("node not installed")
     cases, expected = [], {}
-    for i, c in enumerate(CASES):
+    for i, c in enumerate(make_cases()):
         for state in ("ACT", "WA", "NSW"):
             name = f"{i}:{state}"
-            cases.append({
-                "name": name, "state": state, "pack": c["pack"], "include_member": c["member"],
-                "query": {"q": c["q"], "sort": c["sort"], "min_retailers": c["min_retailers"],
-                          "min_abv": c["abv"][0], "max_abv": c["abv"][1]},
-            })
-            r = queries.compare(site["conn"], state, q=c["q"], sort=c["sort"], pack_type=c["pack"],
-                                include_member=c["member"], min_retailers=c["min_retailers"],
-                                min_abv=c["abv"][0], max_abv=c["abv"][1], limit=1000)
-            expected[name] = (r["meta"]["total"], [p["id"] for p in r["products"]])
+            query = query_of(c)
+            cases.append({"name": name, "state": state, "query": query})
+            r = queries.compare(site["conn"], state, q=query["q"], sort=query["sort"], include_member=query["include_member"],
+                                retailers=query["retailers"], types=query["types"], min_units=query["min_units"],
+                                max_units=query["max_units"], min_abv=query["min_abv"], max_abv=query["max_abv"],
+                                min_retailers=query["min_retailers"], limit=1000)
+            expected[name] = (r["meta"]["total"], [p["id"] for p in r["products"]], digest(r["products"]))
 
     cases_file = site["out"].parent / "cases.json"
     cases_file.write_text(json.dumps(cases))
     run = subprocess.run([NODE, str(ROOT / "tests/js/static_parity.cjs"), str(site["out"]), str(cases_file)],
                          capture_output=True, text=True)
     assert run.returncode == 0, run.stderr
-    got = {r["name"]: (r["total"], r["ids"]) for r in json.loads(run.stdout)["out"]}
-    mismatches = [n for n in expected if got[n] != expected[n]]
+    got = {r["name"]: [r["total"], r["ids"], r["best"]] for r in json.loads(run.stdout)["out"]}
+    mismatches = [n for n in expected if got[n] != json.loads(json.dumps(expected[n]))]
     assert not mismatches, mismatches[:5]
-    assert any(t for t, _ in expected.values())          # not vacuous
-    assert len({tuple(ids) for _, ids in expected.values()}) > 10   # sorting actually varies
+    assert any(t for t, *_ in expected.values())          # not vacuous
+    assert len({tuple(ids) for _, ids, _ in expected.values()}) > 25   # the filters and sorting really vary the answers
+
+
+def test_exported_payload_carries_the_facets_the_dropdowns_use(site):
+    payload = json.loads((site["out"] / "data" / "ACT" / "products.json").read_text())
+    facets = payload["meta"]["facets"]
+    assert facets["units"] == sorted(facets["units"]) and facets["types"]
+    assert all(set(p) >= {"name", "raw_name", "type"} for p in payload["products"])
 
 
 # ---- real browser -----------------------------------------------------------
@@ -196,8 +226,83 @@ def test_a_state_without_its_own_data_is_not_exported_as_a_copy_of_another(tmp_p
     assert len(manifest["all_states"]) == 8                                      # but every state is still listed
     assert not (out / "data" / "NSW").exists() and not (out / "data" / "WA").exists()
     # inside the covered state, a retailer with no data is absent (and a notice says so), never faked
-    act = json.loads((out / "data" / "ACT" / "0-any.json").read_text())
+    act = json.loads((out / "data" / "ACT" / "products.json").read_text())
     assert act["locations"]["retailers"]["bws"]["store_name"] == "Woden"
     assert act["locations"]["retailers"]["liquorland"] is None
     assert "Liquorland prices for Australian Capital Territory" in " ".join(act["locations"]["notices"])
     assert all(set(p["retailers"]) == {"bws"} for p in act["products"])
+
+
+@pytest.mark.skipif(not CHROMIUM.exists(), reason="cached headless Chromium not available")
+def test_new_filters_work_in_a_real_browser(site):
+    pw = pytest.importorskip("playwright.sync_api")
+    handler = partial(SimpleHTTPRequestHandler, directory=str(site["out"]))
+    handler.log_message = lambda *a, **k: None
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with pw.sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, executable_path=str(CHROMIUM))
+            page = browser.new_page(viewport={"width": 1100, "height": 900})
+            problems = []
+            page.on("console", lambda m: problems.append(m.text) if m.type in ("error", "warning") else None)
+            page.on("pageerror", lambda e: problems.append(str(e)))
+            page.goto(f"http://127.0.0.1:{srv.server_port}/")
+            page.wait_for_function("document.querySelectorAll('#state option').length === 9")
+            page.select_option("#state", "ACT")
+            page.wait_for_selector(".card")
+            count = lambda: int(page.evaluate("document.getElementById('summary').textContent.split(' ')[0]"))
+            wait_count = lambda fn: page.wait_for_function(f"(() => {{ const n = parseInt(document.getElementById('summary').textContent); return {fn}; }})()")
+
+            # member offers are on by default; the old pack dropdown and free-text ABV boxes are gone
+            assert page.is_checked("#include_member")
+            assert page.locator("#pack").count() == 0 and page.locator("input#min_abv, input#max_abv").count() == 0
+            assert page.locator("select#min_abv").count() == 1 and page.locator("select#max_abv").count() == 1
+            assert "member offer" in page.inner_text("#results")
+
+            # titles carry no pack size or volume (the volume is shown on its own)
+            titles = page.eval_on_selector_all(".card h2", "els => els.map(e => e.textContent)")
+            assert titles and not any(__import__("re").search(r"\d\s*x\s*\d+\s*ml|\b\d+\s*ml\b", t, __import__("re").I) for t in titles)
+            all_count = count()
+
+            # retailers: several can be picked at once
+            chips = page.locator(".chip")
+            assert chips.count() == 3
+            chips.nth(1).click()                                    # BWS
+            wait_count(f"n < {all_count}")
+            assert chips.nth(1).get_attribute("aria-pressed") == "true"
+            only_bws = count()
+            chips.nth(2).click()                                    # + Liquorland
+            wait_count(f"n > {only_bws}")
+            assert count() == all_count                             # ACT has just those two
+            page.locator("#clear").click()
+            wait_count(f"n === {all_count}")
+            assert page.locator(".chip[aria-pressed='true']").count() == 0
+
+            # type of beer
+            kinds = page.eval_on_selector_all("#type option", "els => els.map(e => e.value)")
+            assert kinds[0] == "" and "Lager" in kinds and len(kinds) > 3
+            page.select_option("#type", "Lager")
+            wait_count(f"n < {all_count}")
+            assert set(page.eval_on_selector_all(".card .badge.kind", "els => els.map(e => e.textContent)")) == {"Lager"}
+            page.select_option("#type", "")
+            wait_count(f"n === {all_count}")
+
+            # quantity range comes from the sizes that exist
+            sizes = page.eval_on_selector_all("#min_units option", "els => els.map(e => e.value).filter(Boolean)")
+            assert "1" in sizes and "24" in sizes
+            page.select_option("#min_units", "24")
+            page.select_option("#max_units", "24")
+            wait_count(f"n < {all_count}")
+            labels = page.eval_on_selector_all(".cell:not(.empty)", "els => els.map(e => e.children[2].textContent)")
+            assert labels and all("Case of 24" in t for t in labels), labels[:3]
+
+            # ABV is a dropdown now
+            page.select_option("#min_units", "")
+            page.select_option("#max_units", "")
+            page.select_option("#min_abv", "5")
+            page.wait_for_function("[...document.querySelectorAll('.card .badge:not(.kind)')].every(b => parseFloat(b.textContent) >= 5)")
+            browser.close()
+        assert problems == [], problems
+    finally:
+        srv.shutdown()

@@ -6,7 +6,8 @@ const RETAILERS = [
 ];
 const PAGE = 40;
 const $ = (id) => document.getElementById(id);
-const state_ = { region: "", offset: 0, states: [] };
+const state_ = { region: "", offset: 0, states: [], retailers: new Set() };
+const ABV_STEPS = [3, 3.5, 4, 4.5, 5, 5.5, 6, 7, 8, 10];
 
 // ---- tiny safe DOM builder (text only; never builds HTML strings) ----------
 function h(tag, attrs, ...kids) {
@@ -57,12 +58,8 @@ async function staticState(region) {
 async function staticCompare(p, limit, offset) {
   const S = window.BeerooStatic;
   const state = await staticState(p.state);
-  const payload = await loadJson(S.variantPath(state, p.include_member, p.pack));
-  return S.applyQuery(payload, {
-    q: p.q, sort: p.sort, limit, offset,
-    min_abv: p.min_abv === "" ? null : p.min_abv, max_abv: p.max_abv === "" ? null : p.max_abv,
-    min_retailers: p.min_retailers || 1,
-  });
+  const payload = await loadJson(S.variantPath(state));
+  return S.applyQuery(payload, { ...p, limit, offset });
 }
 async function staticDetail(id) {
   const state = await staticState(state_.region);
@@ -72,7 +69,11 @@ async function staticDetail(id) {
 // ---- API --------------------------------------------------------------------
 async function api(path, params) {
   const qs = new URLSearchParams();
-  for (const [k, v] of Object.entries(params || {})) if (v !== "" && v != null && v !== false) qs.set(k, v);
+  for (const [k, v] of Object.entries(params || {})) {
+    if (v == null || v === "") continue;
+    if (Array.isArray(v)) v.forEach((x) => qs.append(k, x));
+    else qs.set(k, v);          // booleans go as "true"/"false": the server's default for member offers is "on"
+  }
   const res = await fetch(path + "?" + qs);
   if (!res.ok) {
     let msg = "Something went wrong. Please try again.";
@@ -83,10 +84,17 @@ async function api(path, params) {
 }
 function filterParams() {
   return {
-    state: state_.region, q: $("q").value.trim(), sort: $("sort").value, pack: $("pack").value,
+    state: state_.region, q: $("q").value.trim(), sort: $("sort").value,
+    types: $("type").value ? [$("type").value] : [], retailers: [...state_.retailers],
+    min_units: $("min_units").value, max_units: $("max_units").value,
     min_abv: $("min_abv").value, max_abv: $("max_abv").value,
     include_member: $("include_member").checked, min_retailers: $("multi").checked ? 2 : "",
   };
+}
+// The API names differ slightly from the form's (repeatable "retailer" and "type").
+function apiParams(p) {
+  const { types, retailers, ...rest } = p;
+  return { ...rest, type: types, retailer: retailers };
 }
 
 // ---- Rendering --------------------------------------------------------------
@@ -119,7 +127,7 @@ function abvBadge(p) {
 function card(p) {
   const node = h("article", { class: "card", tabindex: "0", role: "button", "aria-label": "Details for " + p.name },
     h("div", {}, h("h2", {}, p.name),
-      h("div", { class: "meta" }, p.unit_volume_ml ? h("span", {}, Math.round(p.unit_volume_ml) + " mL") : null, abvBadge(p))),
+      h("div", { class: "meta" }, h("span", { class: "badge kind" }, p.type), p.unit_volume_ml ? h("span", {}, Math.round(p.unit_volume_ml) + " mL") : null, abvBadge(p))),
     RETAILERS.map((r) => cell(p, r)));
   const open = () => openDetail(p.id);
   node.addEventListener("click", open);
@@ -145,9 +153,10 @@ async function search(append) {
   try {
     const data = STATIC_MODE
       ? await staticCompare(filterParams(), PAGE, state_.offset)
-      : await api("/api/compare", { ...filterParams(), limit: PAGE, offset: state_.offset });
+      : await api("/api/compare", { ...apiParams(filterParams()), limit: PAGE, offset: state_.offset });
     $("demo-banner").hidden = !data.meta.demo;
     renderLocations(data.locations);
+    fillFacets(data.meta.facets);
     $("filters").hidden = false;
     const list = $("results");
     if (!append) list.replaceChildren();
@@ -247,7 +256,7 @@ function detailBody(d) {
       h("td", { class: "num" }, money(o.unit_price)),
       h("td", {}, ago(o.observed_at))))))));
   const root = h("div", {}, h("h2", { id: "detail-title" }, p.name),
-    h("div", { class: "meta" }, p.unit_volume_ml ? h("span", {}, Math.round(p.unit_volume_ml) + " mL") : null, abvBadge(p)),
+    h("div", { class: "meta" }, h("span", { class: "badge kind" }, p.type), p.unit_volume_ml ? h("span", {}, Math.round(p.unit_volume_ml) + " mL") : null, abvBadge(p)),
     h("h3", {}, "Prices"), table,
     h("h3", {}, "Price history"),
     d.demo ? h("p", { class: "banner demo" }, "Demo data: this history is simulated.") : null,
@@ -280,8 +289,50 @@ $("more").addEventListener("click", () => search(true));
 $("detail-close").addEventListener("click", () => $("detail").close());
 $("detail").addEventListener("click", (e) => { if (e.target === $("detail")) $("detail").close(); });
 let timer;
-for (const id of ["q", "min_abv", "max_abv"]) $(id).addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => search(false), 300); });
-for (const id of ["sort", "pack", "include_member", "multi"]) $(id).addEventListener("change", () => search(false));
+$("q").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => search(false), 300); });
+for (const id of ["sort", "type", "min_units", "max_units", "min_abv", "max_abv", "include_member", "multi"]) {
+  $(id).addEventListener("change", () => search(false));
+}
+
+// ---- Filter widgets -----------------------------------------------------------
+function setOptions(select, first, options) {
+  const keep = select.value;
+  select.replaceChildren(h("option", { value: "" }, first), ...options.map(([value, label]) => h("option", { value }, label)));
+  if (options.some(([value]) => String(value) === keep)) select.value = keep;
+}
+function fillFacets(facets) {
+  if (!facets) return;
+  setOptions($("type"), "All types", facets.types.map((t) => [t.type, `${t.type} (${t.count})`]));
+  const units = facets.units.map((u) => [u, u === 1 ? "1 (single)" : String(u)]);
+  setOptions($("min_units"), "Min: any", units);
+  setOptions($("max_units"), "Max: any", units);
+}
+function buildStaticFilters() {
+  const abv = ABV_STEPS.map((a) => [a, a + "%"]);
+  setOptions($("min_abv"), "Min: any", abv);
+  setOptions($("max_abv"), "Max: any", abv);
+  $("retailer-chips").replaceChildren(...RETAILERS.map((r) => {
+    const chip = h("button", { type: "button", class: "chip", "aria-pressed": "false", "data-retailer": r.id },
+      h("span", { class: "dot", style: "background:" + r.color }), r.name);
+    chip.addEventListener("click", () => {
+      const on = !state_.retailers.has(r.id);
+      on ? state_.retailers.add(r.id) : state_.retailers.delete(r.id);
+      chip.setAttribute("aria-pressed", String(on));
+      search(false);
+    });
+    return chip;
+  }));
+  $("clear").addEventListener("click", () => {
+    $("q").value = "";
+    for (const id of ["type", "min_units", "max_units", "min_abv", "max_abv"]) $(id).value = "";
+    $("sort").value = "value";
+    $("include_member").checked = true;
+    $("multi").checked = false;
+    state_.retailers.clear();
+    document.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", "false"));
+    search(false);
+  });
+}
 
 async function loadStates() {
   if (STATIC_MODE) {
@@ -291,6 +342,7 @@ async function loadStates() {
   return (await api("/api/states")).states;
 }
 async function init() {
+  buildStaticFilters();
   try {
     state_.states = await loadStates();
   } catch (e) { return showStateError("Couldn't load the list of states. Please reload."); }

@@ -525,7 +525,8 @@ def test_clear_backoff_resets_only_the_named_retailer(state):
 def test_cli_clear_backoff_then_runs_that_retailer(tmp_path, monkeypatch):
     calls = []
     st = str(tmp_path / "s.json")
-    go(st, {"dan_murphys": blocked("dan_murphys", [])}, zones_per_run=1)
+    # the CLI below uses the real clock, so the block must be recent in real time too (a fixed NOW goes stale)
+    go(st, {"dan_murphys": blocked("dan_murphys", [])}, zones_per_run=1, now=datetime.now(timezone.utc))
     monkeypatch.setattr(ss, "DEFAULT_LOG", tmp_path / "scrape.log")
     monkeypatch.setattr(ss, "real_scrapes", lambda browser_path=None: {n: fake(n, calls=calls) for n in ALL})
     skipped = ss.main(["--db", str(tmp_path / "x.sqlite3"), "--state", st, "--retailer", "dan_murphys", "--zone", "NSW", "--min-spacing", "0"])

@@ -1,11 +1,12 @@
 "use strict";
-// Client-side equivalent of the server's /api/compare for the FREE static
-// site: the exporter writes pre-computed product files per state and per
-// (member offers x pack) variant; this file picks the file for a state, and applies search/ABV/retailer filters and sorting exactly
-// as app/queries.py does (a parity test enforces that).
+// Client-side equivalent of the server's /api/compare for the FREE static site.
+// The exporter writes ONE file per state with every product and every price option;
+// this file narrows them (member offers, pack-size range), redoes the derived
+// "best price" fields, applies the product filters and sorts, exactly as
+// app/queries.py does (a parity test enforces that).
 (function (root) {
-  function variantPath(state, includeMember, pack) {
-    return `data/${state}/${includeMember ? 1 : 0}-${pack || "any"}.json`;
+  function variantPath(state) {
+    return `data/${state}/products.json`;
   }
 
   function detailPath(state, productId) {
@@ -25,9 +26,64 @@
     name: (a, b) => lt(a.name.toLowerCase(), b.name.toLowerCase()),
   };
 
+  // First option with the smallest non-null value (Python's min() over the same list).
+  function best(options, key) {
+    let pick = null;
+    for (const o of options) if (o[key] != null && (pick === null || o[key] < pick[key])) pick = o;
+    return pick;
+  }
+
+  function finishEntry(entry) {
+    entry.options.sort((a, b) => a.units - b.units || Number(a.member_only) - Number(b.member_only));
+    entry.best_value = best(entry.options, "price_per_standard_drink");
+    entry.cheapest_unit = best(entry.options, "unit_price");
+    entry.last_updated = entry.options.reduce((m, o) => (o.observed_at > m ? o.observed_at : m), "");
+    entry.stale = entry.options.every((o) => o.stale);
+  }
+
+  // Which retailer wins on each metric (needs 2+ to compete); ties go to the earlier retailer id.
+  function markBest(product) {
+    for (const [metric, field, flag] of [
+      ["price_per_standard_drink", "best_value", "best_value"],
+      ["unit_price", "cheapest_unit", "best_unit_price"],
+    ]) {
+      const scored = Object.entries(product.retailers)
+        .filter(([, e]) => e[field])
+        .map(([r, e]) => [e[field][metric], r]);
+      scored.sort((a, b) => lt(a[0], b[0]) || lt(a[1], b[1]));
+      product[flag + "_retailer"] = scored.length >= 2 ? scored[0][1] : null;
+      product["min_" + metric] = scored.length ? Math.min(...scored.map((s) => s[0])) : null;
+    }
+  }
+
+  function refilter(products, includeMember, minUnits, maxUnits) {
+    const kept = [];
+    for (const p of products) {
+      const retailers = {};
+      for (const [r, entry] of Object.entries(p.retailers)) {
+        const options = entry.options.filter((o) =>
+          (includeMember || !o.member_only)
+          && (minUnits == null || o.units >= minUnits)
+          && (maxUnits == null || o.units <= maxUnits));
+        if (!options.length) continue;
+        const fresh = { ...entry, options: options.slice() };
+        finishEntry(fresh);
+        retailers[r] = fresh;
+      }
+      if (!Object.keys(retailers).length) continue;
+      const copy = { ...p, retailers };
+      markBest(copy);
+      kept.push(copy);
+    }
+    return kept;
+  }
+
+  const num = (v) => (v == null || v === "" ? null : Number(v));
+
   /**
-   * @param payload one exported variant file {meta, locations, products}
-   * @param q {q, sort, min_abv, max_abv, min_retailers, retailers, limit, offset}
+   * @param payload one exported state file {meta, locations, products}
+   * @param q {q, sort, include_member (default true), min_abv, max_abv, min_units, max_units,
+   *           min_retailers, retailers: [ids], types: [names], limit, offset}
    * @returns same shape as GET /api/compare
    */
   function applyQuery(payload, q) {
@@ -35,15 +91,17 @@
     if (!SORTS[sort]) throw new Error("sort must be one of " + Object.keys(SORTS).sort().join(", "));
     const tokens = String(q.q || "").toLowerCase().split(/\s+/).filter(Boolean);
     const wanted = q.retailers && q.retailers.length ? new Set(q.retailers) : null;
+    const wantedTypes = q.types && q.types.length ? new Set(q.types) : null;
     const minRetailers = q.min_retailers || 1;
-    const minAbv = q.min_abv == null || q.min_abv === "" ? null : Number(q.min_abv);
-    const maxAbv = q.max_abv == null || q.max_abv === "" ? null : Number(q.max_abv);
+    const minAbv = num(q.min_abv), maxAbv = num(q.max_abv);
 
-    const result = payload.products.filter((p) => {
-      const name = p.name.toLowerCase();
+    const products = refilter(payload.products, q.include_member !== false, num(q.min_units), num(q.max_units));
+    const result = products.filter((p) => {
+      const name = p.raw_name.toLowerCase();
       if (tokens.length && !tokens.every((t) => name.includes(t))) return false;
       const present = Object.keys(p.retailers);
       if (wanted && !present.some((r) => wanted.has(r))) return false;
+      if (wantedTypes && !wantedTypes.has(p.type)) return false;
       if (present.length < minRetailers) return false;
       if (minAbv !== null || maxAbv !== null) {
         if (p.abv == null) return false;
@@ -62,7 +120,7 @@
     };
   }
 
-  const api = { variantPath, detailPath, applyQuery };
+  const api = { variantPath, detailPath, applyQuery, refilter };
   root.BeerooStatic = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(typeof window !== "undefined" ? window : globalThis);

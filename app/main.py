@@ -88,9 +88,11 @@ def create_app(db_path=None):
         state: str,
         q: str = "",
         sort: str = "value",
-        pack: Optional[str] = None,
-        include_member: bool = False,
+        include_member: bool = True,
         retailer: list[str] = Query(default=[]),
+        type: list[str] = Query(default=[]),
+        min_units: Optional[int] = Query(default=None, ge=1, le=100),
+        max_units: Optional[int] = Query(default=None, ge=1, le=100),
         min_abv: Optional[float] = Query(default=None, ge=0, le=100),
         max_abv: Optional[float] = Query(default=None, ge=0, le=100),
         min_retailers: int = Query(default=1, ge=1, le=3),
@@ -105,9 +107,10 @@ def create_app(db_path=None):
         conn = connection()
         try:
             return queries.compare(
-                conn, checked_state(state), q=q, sort=sort, pack_type=pack,
-                include_member=include_member, retailers=retailer or None,
+                conn, checked_state(state), q=q, sort=sort,
+                include_member=include_member, retailers=retailer or None, types=type or None,
                 min_abv=min_abv, max_abv=max_abv, min_retailers=min_retailers,
+                min_units=min_units, max_units=max_units,
                 limit=limit, offset=offset,
             )
         except ValueError as e:

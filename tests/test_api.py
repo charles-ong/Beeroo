@@ -131,19 +131,77 @@ def test_cheapest_retailer_is_flagged_only_when_two_compete(client):
     assert all(p["best_value_retailer"] is None for p in singles)
 
 
-def test_member_offers_hidden_by_default(client):
-    off = client.get("/api/compare", params={"state": "ACT", "limit": 200}).json()["products"]
-    on = client.get("/api/compare", params={"state": "ACT", "limit": 200, "include_member": True}).json()["products"]
-    count = lambda ps: sum(len(e["options"]) for p in ps for e in p["retailers"].values())
-    assert not any(o["member_only"] for p in off for e in p["retailers"].values() for o in e["options"])
-    assert count(on) > count(off)
+def options_of(products):
+    return [o for p in products for e in p["retailers"].values() for o in e["options"]]
 
 
-def test_pack_filter_and_abv_filter(client):
-    data = client.get("/api/compare", params={"state": "ACT", "pack": "case", "limit": 200}).json()
-    assert all(o["pack_type"] == "case" for p in data["products"] for e in p["retailers"].values() for o in e["options"])
+def test_member_offers_are_included_by_default_and_can_be_hidden(client):
+    on = client.get("/api/compare", params={"state": "ACT", "limit": 200}).json()["products"]
+    off = client.get("/api/compare", params={"state": "ACT", "limit": 200, "include_member": False}).json()["products"]
+    assert any(o["member_only"] for o in options_of(on))
+    assert not any(o["member_only"] for o in options_of(off))
+    assert len(options_of(on)) > len(options_of(off))
+
+
+def test_hiding_member_offers_changes_the_best_price_too(client):
+    on = {p["id"]: p for p in client.get("/api/compare", params={"state": "ACT", "limit": 200}).json()["products"]}
+    off = {p["id"]: p for p in client.get("/api/compare", params={"state": "ACT", "limit": 200, "include_member": False}).json()["products"]}
+    shown = [i for i in off if on[i]["min_unit_price"] != off[i]["min_unit_price"]]
+    assert shown                                      # a member price was the cheapest for some products
+    for i in shown:
+        assert on[i]["min_unit_price"] < off[i]["min_unit_price"]
+
+
+def test_quantity_range_keeps_only_matching_pack_sizes_and_recomputes(client):
+    data = client.get("/api/compare", params={"state": "ACT", "min_units": 12, "limit": 200}).json()
+    assert data["products"] and all(o["units"] >= 12 for o in options_of(data["products"]))
+    capped = client.get("/api/compare", params={"state": "ACT", "max_units": 6, "limit": 200}).json()
+    assert capped["products"] and all(o["units"] <= 6 for o in options_of(capped["products"]))
+    exact = client.get("/api/compare", params={"state": "ACT", "min_units": 24, "max_units": 24, "limit": 200}).json()["products"]
+    assert exact and {o["units"] for o in options_of(exact)} == {24}
+    for p in exact:                                   # the "best" fields only consider what is still shown
+        for e in p["retailers"].values():
+            assert e["cheapest_unit"]["units"] == 24
+    none = client.get("/api/compare", params={"state": "ACT", "min_units": 40, "max_units": 30}).json()
+    assert none["products"] == [] and none["meta"]["total"] == 0
+
+
+def test_filter_by_one_or_more_retailers(client):
+    both = client.get("/api/compare", params={"state": "ACT", "limit": 200}).json()["meta"]["total"]
+    bws = client.get("/api/compare", params={"state": "ACT", "retailer": "bws", "limit": 200}).json()
+    assert 0 < bws["meta"]["total"] <= both and all("bws" in p["retailers"] for p in bws["products"])
+    either = client.get("/api/compare", params={"state": "ACT", "retailer": ["bws", "liquorland"], "limit": 200}).json()
+    assert either["meta"]["total"] == both               # ACT has only those two retailers
+
+
+def test_filter_by_type_and_facets_list_what_exists(client):
+    data = client.get("/api/compare", params={"state": "ACT", "limit": 1}).json()
+    facets = data["meta"]["facets"]
+    assert facets["units"] == sorted(facets["units"]) and 1 in facets["units"]
+    types = {t["type"]: t["count"] for t in facets["types"]}
+    assert "Lager" in types and sum(types.values()) == data["meta"]["total"]
+    pick = next(t for t in types if t != "Lager")
+    only = client.get("/api/compare", params={"state": "ACT", "type": pick, "limit": 200}).json()
+    assert only["meta"]["total"] == types[pick] and {p["type"] for p in only["products"]} == {pick}
+    two = client.get("/api/compare", params={"state": "ACT", "type": [pick, "Lager"], "limit": 200}).json()
+    assert two["meta"]["total"] == types[pick] + types["Lager"]
+
+
+def test_titles_have_no_pack_size_or_volume_but_search_still_finds_them(client):
+    products = client.get("/api/compare", params={"state": "ACT", "limit": 200}).json()["products"]
+    import re
+    assert not any(re.search(r"\d\s*x\s*\d+\s*ml|\b\d+\s*ml\b", p["name"], re.I) for p in products)
+    assert all(p["raw_name"] for p in products) and any(p["raw_name"] != p["name"] for p in products)
+    some = next(p for p in products if p["unit_volume_ml"])
+    found = client.get("/api/compare", params={"state": "ACT", "q": f"{int(some['unit_volume_ml'])}ml", "limit": 200}).json()
+    assert some["id"] in {p["id"] for p in found["products"]}
+
+
+def test_abv_filter(client):
     strong = client.get("/api/compare", params={"state": "ACT", "min_abv": 5, "limit": 200}).json()["products"]
     assert strong and all(p["abv"] >= 5 for p in strong)
+    mid = client.get("/api/compare", params={"state": "ACT", "min_abv": 3.5, "max_abv": 4.5, "limit": 200}).json()["products"]
+    assert mid and all(3.5 <= p["abv"] <= 4.5 for p in mid)
 
 
 def test_abv_source_is_exposed_for_borrowed_abv(conn):
@@ -171,9 +229,9 @@ def test_stale_flag(conn):
     assert not any(e["stale"] for p in fresh["products"] for e in p["retailers"].values())
 
 
-def test_bad_sort_and_pack_are_400(client):
+def test_bad_sort_type_and_retailer_are_400(client):
     assert client.get("/api/compare", params={"state": "ACT", "sort": "nope"}).status_code == 400
-    assert client.get("/api/compare", params={"state": "ACT", "pack": "nope"}).status_code == 400
+    assert client.get("/api/compare", params={"state": "ACT", "type": "Mead"}).status_code == 400
     assert client.get("/api/compare", params={"state": "ACT", "retailer": "x"}).status_code == 400
 
 
@@ -273,7 +331,7 @@ def test_a_series_not_seen_on_the_listings_latest_scrape_day_is_hidden(tmp_path)
     ingest.run_matching(conn)
 
     got = queries.compare(conn, "ACT", limit=50, now=day2)
-    by_name = {p["name"]: p for p in got["products"]}
+    by_name = {p["raw_name"]: p for p in got["products"]}
     options = lambda name: sorted((o["units"], o["price"]) for o in by_name[name]["retailers"]["bws"]["options"])
     assert options("Test Lager Cans 375ml") == [(1, 5.0), (10, 25.0)]       # no more "10 for $5"
     assert options("Other Lager Cans 375ml") == [(1, 6.0)]                   # still shown, just older

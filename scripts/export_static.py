@@ -5,7 +5,7 @@
 
 Writes site/index.html + static assets + data files:
   data/manifest.json                    which states are covered, when generated
-  data/<ST>/<member>-<pack>.json        all products for a state (8 variants)
+  data/<ST>/products.json               every product and price option for a state (the browser filters)
   data/<ST>/p/<productId>.json          product detail + price history
 
 Host the folder on any static host (GitHub Pages, Cloudflare Pages, Netlify).
@@ -25,7 +25,6 @@ from app import queries  # noqa: E402
 from common import db  # noqa: E402
 from common.states import STATES, state_list  # noqa: E402
 
-PACKS = [None, "single", "pack", "case"]
 DEFAULT_STATES = list(STATES)
 
 
@@ -54,16 +53,12 @@ def export(conn, out_dir, states=DEFAULT_STATES, now=None):
         if not latest:
             continue
         covered.append(state)
+        products = queries.load_products(conn, locations, now)
         meta = {"demo": demo, "latest_data": max(latest), "state": state,
-                "generated_at": now.isoformat()}
+                "generated_at": now.isoformat(), "facets": queries.facets(products)}
+        write(out / queries_path(state), {"meta": meta, "locations": locations, "products": products})
 
-        for include_member in (False, True):
-            for pack in PACKS:
-                products = queries.load_products(conn, locations, include_member, pack, now)
-                write(out / queries_path(state, include_member, pack),
-                      {"meta": meta, "locations": locations, "products": products})
-
-        ids = {p["id"] for p in queries.load_products(conn, locations, True, None, now)}
+        ids = {p["id"] for p in products}
         for pid in sorted(ids):
             detail = queries.product_detail(conn, pid, state, now)
             if detail:
@@ -76,8 +71,8 @@ def export(conn, out_dir, states=DEFAULT_STATES, now=None):
     return {"states": covered, **written}
 
 
-def queries_path(state, include_member, pack):
-    return Path("data") / state / f"{1 if include_member else 0}-{pack or 'any'}.json"
+def queries_path(state):
+    return Path("data") / state / "products.json"
 
 
 def copy_site(out_dir):

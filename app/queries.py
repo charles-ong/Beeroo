@@ -3,6 +3,7 @@ connection (no HTTP), so they can be tested directly."""
 import statistics
 from datetime import datetime, timezone
 
+from common.beer_types import TYPES, beer_type, display_name
 from common.db import get_meta
 from common.states import STATES, has_stores, normalise_state
 from common.value import value_metrics
@@ -15,7 +16,6 @@ RETAILER_NAMES = {
 }
 STALE_DAYS = 7
 SORTS = {"value", "unit_price", "abv", "name"}
-PACK_TYPES = {"single", "pack", "case"}
 
 
 def _parse(ts):
@@ -149,8 +149,19 @@ def _best(options, key):
     return min(pool, key=lambda o: o[key]) if pool else None
 
 
-def load_products(conn, locations, include_member=False, pack_type=None, now=None):
-    """All matched products with per-retailer options at the chosen locations."""
+def _finish_entry(entry):
+    """Derived per-retailer fields, from the options the entry currently holds."""
+    entry["options"].sort(key=lambda o: (o["units"], o["member_only"]))
+    entry["best_value"] = _best(entry["options"], "price_per_standard_drink")
+    entry["cheapest_unit"] = _best(entry["options"], "unit_price")
+    entry["last_updated"] = max(o["observed_at"] for o in entry["options"])
+    entry["stale"] = all(o["stale"] for o in entry["options"])
+
+
+def load_products(conn, locations, now=None):
+    """All matched products with EVERY price option each retailer has at the
+    chosen locations (member offers and all pack sizes). `refilter` narrows
+    them; the static site does the same narrowing in the browser."""
     now = now or datetime.now(timezone.utc)
     products = {}
 
@@ -161,20 +172,19 @@ def load_products(conn, locations, include_member=False, pack_type=None, now=Non
         for row in conn.execute(_LATEST_OPTIONS_SQL, (loc["location_key"], loc["location_key"], retailer)):
             if row["product_id"] is None:
                 continue
-            if row["member_only"] and not include_member:
-                continue
-            if pack_type and row["pack_type"] != pack_type:
-                continue
 
             volume = row["pvol"] or row["lvol"]
             abv = row["pabv"] if row["pabv"] is not None else row["labv"]
             source = row["abv_source"] if row["pabv"] is not None else (retailer if abv is not None else None)
 
+            raw = row["pname"] or row["lname"]
             product = products.setdefault(
                 row["product_id"],
                 {
                     "id": row["product_id"],
-                    "name": row["pname"] or row["lname"],
+                    "name": display_name(raw),
+                    "raw_name": raw,
+                    "type": beer_type(raw, abv),
                     "unit_volume_ml": volume,
                     "abv": abv,
                     "abv_source": source,
@@ -189,15 +199,60 @@ def load_products(conn, locations, include_member=False, pack_type=None, now=Non
 
     for product in products.values():
         for entry in product["retailers"].values():
-            entry["options"].sort(key=lambda o: (o["units"], o["member_only"]))
-            entry["best_value"] = _best(entry["options"], "price_per_standard_drink")
-            entry["cheapest_unit"] = _best(entry["options"], "unit_price")
-            entry["last_updated"] = max(o["observed_at"] for o in entry["options"])
-            entry["stale"] = all(o["stale"] for o in entry["options"])
+            _finish_entry(entry)
 
         _mark_best(product)
 
     return list(products.values())
+
+
+def refilter(products, include_member=True, min_units=None, max_units=None):
+    """Keep only the price options that are wanted (member offers or not, a range
+    of pack sizes) and redo everything derived from them: best prices, who wins,
+    last updated. Products with nothing left are dropped. Mirrored exactly by
+    applyQuery in app/static/staticdata.js (a parity test checks it)."""
+    kept = []
+
+    for product in products:
+        retailers = {}
+
+        for retailer, entry in product["retailers"].items():
+            options = [
+                o for o in entry["options"]
+                if (include_member or not o["member_only"])
+                and (min_units is None or o["units"] >= min_units)
+                and (max_units is None or o["units"] <= max_units)
+            ]
+
+            if not options:
+                continue
+
+            fresh = {**entry, "options": list(options)}
+            _finish_entry(fresh)
+            retailers[retailer] = fresh
+
+        if not retailers:
+            continue
+
+        copy = {**product, "retailers": retailers}
+        _mark_best(copy)
+        kept.append(copy)
+
+    return kept
+
+
+def facets(products):
+    """What the filter dropdowns can offer for these products."""
+    units = sorted({o["units"] for p in products for e in p["retailers"].values() for o in e["options"]})
+    counts = {}
+
+    for p in products:
+        counts[p["type"]] = counts.get(p["type"], 0) + 1
+
+    return {
+        "units": units,
+        "types": [{"type": t, "count": counts[t]} for t in TYPES if t in counts],
+    }
 
 
 def _mark_best(product):
@@ -216,24 +271,30 @@ def _mark_best(product):
         product["min_" + metric] = min((s for s, _ in scored), default=None)
 
 
-def compare(conn, state, q="", sort="value", pack_type=None, include_member=False,
-            retailers=None, min_abv=None, max_abv=None, min_retailers=1,
-            limit=50, offset=0, now=None):
+def compare(conn, state, q="", sort="value", include_member=True, retailers=None,
+            min_abv=None, max_abv=None, min_retailers=1, min_units=None, max_units=None,
+            types=None, limit=50, offset=0, now=None):
     if sort not in SORTS:
         raise ValueError(f"sort must be one of {sorted(SORTS)}")
-    if pack_type and pack_type not in PACK_TYPES:
-        raise ValueError(f"pack must be one of {sorted(PACK_TYPES)}")
+    unknown = set(types or []) - set(TYPES)
+    if unknown:
+        raise ValueError(f"unknown beer type(s): {sorted(unknown)}")
 
     locations = resolve_locations(conn, state)
-    products = load_products(conn, locations, include_member, pack_type, now)
+    everything = load_products(conn, locations, now)
+    available = facets(everything)
+    products = refilter(everything, include_member, min_units, max_units)
     tokens = q.lower().split()
     wanted = set(retailers) if retailers else None
+    wanted_types = set(types) if types else None
     result = []
 
     for p in products:
-        if tokens and not all(t in p["name"].lower() for t in tokens):
+        if tokens and not all(t in p["raw_name"].lower() for t in tokens):
             continue
         if wanted and not wanted & set(p["retailers"]):
+            continue
+        if wanted_types and p["type"] not in wanted_types:
             continue
         if len(p["retailers"]) < min_retailers:
             continue
@@ -267,6 +328,7 @@ def compare(conn, state, q="", sort="value", pack_type=None, include_member=Fals
             "offset": offset,
             "demo": get_meta(conn, "demo") == "1",
             "latest_data": max(latest) if latest else None,
+            "facets": available,
         },
         "locations": locations,
         "products": result[offset: offset + limit],
@@ -301,7 +363,7 @@ def product_detail(conn, product_id, state, now=None):
     now = now or datetime.now(timezone.utc)
     locations = resolve_locations(conn, state)
     products = [
-        p for p in load_products(conn, locations, include_member=True, now=now)
+        p for p in load_products(conn, locations, now)
         if p["id"] == product_id
     ]
 
