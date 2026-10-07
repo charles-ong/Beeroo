@@ -6,6 +6,7 @@ Pure functions only: no browser, no network. Tested against saved fixtures.
 import re
 
 from common.records import (
+    clean_rating,
     pack_type_for_units,
     Listing,
     PackType,
@@ -140,6 +141,8 @@ def parse_product(
         details.get("webliquorsize") or product.get("PackageSize") or ""
     )
 
+    rating, review_count = clean_rating(product.get("OverallRating"), product.get("NumberOfReviews"))
+
     listing = Listing(
         retailer=retailer,
         retailer_sku=sku,
@@ -149,6 +152,8 @@ def parse_product(
         category=details.get("webproducttype") or "beer",
         abv=abv,
         unit_volume_ml=volume,
+        rating=rating,
+        review_count=review_count,
     )
 
     return ScrapedProduct(

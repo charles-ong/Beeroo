@@ -26,6 +26,27 @@ def pack_type_for_units(units):
     return PackType.CASE if units >= CASE_MIN_UNITS else PackType.PACK
 
 
+def clean_rating(rating, count):
+    """(rating, review_count) as a retailer reports them -> what we store.
+    No reviews (or a zero/garbage rating) means no rating, not 0 stars; an
+    unknown count stays unknown."""
+    try:
+        count = None if count is None else int(count)
+    except (TypeError, ValueError):
+        count = None
+    try:
+        rating = None if rating is None else round(float(rating), 2)
+    except (TypeError, ValueError):
+        rating = None
+    if count is not None and count < 0:
+        count = None
+    if rating is not None and not (0 < rating <= 5):
+        rating = None
+    if count == 0:
+        rating = None
+    return rating, count
+
+
 class Retailer(str, Enum):
     DAN_MURPHYS = "dan_murphys"
     BWS = "bws"
@@ -47,6 +68,8 @@ class Listing(BaseModel):
     category: Optional[str] = None
     abv: Optional[float] = Field(default=None, ge=0, le=100)
     unit_volume_ml: Optional[float] = Field(default=None, gt=0, le=20000)
+    rating: Optional[float] = Field(default=None, gt=0, le=5)         # average stars; None = no reviews / unknown
+    review_count: Optional[int] = Field(default=None, ge=0)          # None = this source doesn't say
 
     @field_validator("name", "retailer_sku", "url")
     @classmethod

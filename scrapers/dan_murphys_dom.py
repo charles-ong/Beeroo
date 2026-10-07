@@ -13,6 +13,7 @@ Pure functions only: no browser, no network. Handles the card text both as
 import re
 
 from common.records import (
+    clean_rating,
     Listing,
     PackType,
     PriceObservation,
@@ -40,6 +41,7 @@ _TOKEN = re.compile(
     re.I | re.X,
 )
 _SKIP_LINES = {"MEMBER OFFER", "NON-MEMBER", "ADD TO CART", "SPONSORED", ")"}
+_REVIEWS = re.compile(r"\(\s*(\d[\d,]*)\s*REVIEWS?\b", re.I)   # "(116 REVIEWS)"; never "pack (6)"
 _TITLE_QTY = re.compile(r"\b(\d+)\s*x\s*\d+(?:\.\d+)?\s*mL\b", re.I)
 _PER_WORD = {"case": "case", "block": "case", "carton": "case", "pack": "pack", "bottle": "one", "can": "one"}
 
@@ -151,6 +153,10 @@ def parse_card(card, location_key, observed_at=None):
     if not prices:
         raise ValueError("no online prices")
 
+    reviews = _REVIEWS.search(" ".join(lines))
+    rating, review_count = clean_rating(
+        card.get("rating"), int(reviews.group(1).replace(",", "")) if reviews else None)
+
     listing = Listing(
         retailer=Retailer.DAN_MURPHYS,
         retailer_sku=sku,
@@ -158,6 +164,8 @@ def parse_card(card, location_key, observed_at=None):
         name=name,
         brand=brand,
         category="beer",
+        rating=rating,
+        review_count=review_count,
     )
     return ScrapedProduct(listing=listing, prices=prices)
 
@@ -177,7 +185,8 @@ def parse_cards_payload(payload, location_key, observed_at=None):
             if not isinstance(card, dict) or len(card.get("lines") or []) > MAX_LINES:
                 raise ValueError("malformed card")
             parsed = parse_card(
-                {"href": card.get("href"), "lines": [str(l)[:MAX_LINE_CHARS] for l in card["lines"]]},
+                {"href": card.get("href"), "rating": card.get("rating"),
+                 "lines": [str(l)[:MAX_LINE_CHARS] for l in card["lines"]]},
                 location_key, observed_at,
             )
         except (ValueError, KeyError) as e:

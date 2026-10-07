@@ -17,7 +17,7 @@ the freshness report marks it n/a). The other seven states and territories are c
 3. **Copy the products.** Open the browser's developer console (Chrome/Edge: View → Developer → JavaScript
    Console), paste this and press Enter. It puts the product cards on your clipboard (nothing visible happens):
    ```js
-   copy(JSON.stringify({cards:[...document.querySelectorAll('shop-product-card')].map(c=>{const a=c.querySelector('a[href*="/product/"]');return {href:a?a.getAttribute('href'):'',lines:c.innerText.split('\n')}})}))
+   copy(JSON.stringify({cards:[...document.querySelectorAll('shop-product-card')].map(c=>{const a=c.querySelector('a[href*="/product/"]'),s=c.querySelector('shop-star-rating'),h=s&&s.querySelector('.half-star-rating');return {href:a?a.getAttribute('href'):'',rating:s?Math.round((s.querySelectorAll('.rating-icon.checked').length+(h?parseFloat(h.style.width)/100||0:0))*100)/100:null,lines:c.innerText.split('\n')}})}))
    ```
    (If the console asks you to type `allow pasting` first, do that.)
 4. **Import from the clipboard**, naming the state you set in step 1:
@@ -35,7 +35,7 @@ Format → Make Plain Text with smart quotes off) and pass the file instead of `
 
 ## What it does
 
-- Reads the cards exactly like the scraper's card parser (`scrapers/dan_murphys_dom.py`): name, case/pack/each
+- Reads the cards exactly like the scraper's card parser (`scrapers/dan_murphys_dom.py`): name, star rating and review count, case/pack/each
   prices, member offers (kept, flagged as member prices), skipping in-store-only prices. ABV comes only from the
   name; it is never invented.
 - Refuses a page with fewer than 40 products (you probably didn't finish "Load more"; `--force` overrides), or one

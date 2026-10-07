@@ -26,6 +26,18 @@ function h(tag, attrs, ...kids) {
   return el;
 }
 const money = (n) => "$" + Number(n).toFixed(2);
+// Five stars with the right share filled (width set through CSSOM: our CSP forbids style attributes).
+function stars(rating) {
+  const fill = h("span", { class: "fill", "aria-hidden": "true" }, "★★★★★");
+  fill.style.width = Math.max(0, Math.min(5, rating)) / 5 * 100 + "%";
+  return h("span", { class: "stars", role: "img", "aria-label": rating.toFixed(1) + " out of 5 stars" },
+    h("span", { "aria-hidden": "true" }, "★★★★★"), fill);
+}
+function ratingBadge(p) {
+  if (!p.rating) return null;
+  return h("span", { class: "rating", title: "Average of " + p.review_count + " review" + (p.review_count === 1 ? "" : "s") + " across retailers" },
+    stars(p.rating), p.rating.toFixed(1), p.review_count ? h("span", { class: "count" }, "(" + p.review_count + ")") : null);
+}
 const esc2 = (n) => Number(n).toFixed(2);
 function ago(iso) {
   const days = Math.floor((Date.now() - new Date(iso)) / 864e5);
@@ -85,7 +97,7 @@ async function api(path, params) {
 function filterParams() {
   return {
     state: state_.region, q: $("q").value.trim(), sort: $("sort").value,
-    types: $("type").value ? [$("type").value] : [], retailers: [...state_.retailers],
+    types: selectedTypes(), retailers: [...state_.retailers],
     min_units: $("min_units").value, max_units: $("max_units").value,
     min_abv: $("min_abv").value, max_abv: $("max_abv").value,
     include_member: $("include_member").checked, min_retailers: $("multi").checked ? 2 : "",
@@ -127,7 +139,8 @@ function abvBadge(p) {
 function card(p) {
   const node = h("article", { class: "card", tabindex: "0", role: "button", "aria-label": "Details for " + p.name },
     h("div", {}, h("h2", {}, p.name),
-      h("div", { class: "meta" }, h("span", { class: "badge kind" }, p.type), p.unit_volume_ml ? h("span", {}, Math.round(p.unit_volume_ml) + " mL") : null, abvBadge(p))),
+      h("div", { class: "meta" }, h("span", { class: "badge kind" }, p.type), p.unit_volume_ml ? h("span", {}, Math.round(p.unit_volume_ml) + " mL") : null, abvBadge(p)),
+      h("div", { class: "meta" }, ratingBadge(p))),
     RETAILERS.map((r) => cell(p, r)));
   const open = () => openDetail(p.id);
   node.addEventListener("click", open);
@@ -221,6 +234,27 @@ const SIGNALS = {
   usual: ["Around its usual price", ""], above_usual: ["Above its usual price", "bad"],
   not_enough_history: ["Not enough history yet to say if this is a good price", ""],
 };
+function reviewsSection(p) {
+  const rows = RETAILERS.map((r) => {
+    const e = p.retailers[r.id];
+    const name = h("span", { class: "rname" }, h("span", { class: "dot", style: "background:" + r.color }), r.name);
+    if (!e) return h("tr", {}, h("td", {}, name), h("td", { colspan: 3, class: "sub" }, "Not listed"));
+    if (!e.rating) {
+      return h("tr", {}, h("td", {}, name), h("td", { colspan: 3, class: "sub" },
+        e.review_count === 0 ? "No reviews yet" : "Ratings not available from this retailer"));
+    }
+    return h("tr", {}, h("td", {}, name), h("td", {}, stars(e.rating)),
+      h("td", { class: "num" }, e.rating.toFixed(1)),
+      h("td", { class: "num" }, e.review_count ? e.review_count + " review" + (e.review_count === 1 ? "" : "s") : ""));
+  });
+  const head = p.rating
+    ? h("div", { class: "big" }, h("span", { class: "num" }, p.rating.toFixed(1)), stars(p.rating),
+      h("span", { class: "sub" }, p.review_count ? `average of ${p.review_count} review${p.review_count === 1 ? "" : "s"}` : "average rating"))
+    : h("p", { class: "sub" }, "No ratings yet for this product.");
+  return h("div", { class: "reviews" }, head,
+    h("div", { class: "tbl" }, h("table", {}, h("tbody", {}, rows))),
+    h("p", { class: "sub" }, "Average ratings as shown by each retailer, pooled by number of reviews. Review text isn't collected."));
+}
 function detailBody(d) {
   const p = d.product;
   const keys = [...new Set(Object.values(d.history).flatMap((h2) => Object.keys(h2)))]
@@ -257,7 +291,9 @@ function detailBody(d) {
       h("td", {}, ago(o.observed_at))))))));
   const root = h("div", {}, h("h2", { id: "detail-title" }, p.name),
     h("div", { class: "meta" }, h("span", { class: "badge kind" }, p.type), p.unit_volume_ml ? h("span", {}, Math.round(p.unit_volume_ml) + " mL") : null, abvBadge(p)),
+    h("div", { class: "meta" }, ratingBadge(p)),
     h("h3", {}, "Prices"), table,
+    h("h3", {}, "Reviews"), reviewsSection(p),
     h("h3", {}, "Price history"),
     d.demo ? h("p", { class: "banner demo" }, "Demo data: this history is simulated.") : null,
     keys.length ? [select, chartBox, info] : h("p", { class: "sub" }, "No history yet."));
@@ -290,7 +326,7 @@ $("detail-close").addEventListener("click", () => $("detail").close());
 $("detail").addEventListener("click", (e) => { if (e.target === $("detail")) $("detail").close(); });
 let timer;
 $("q").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => search(false), 300); });
-for (const id of ["sort", "type", "min_units", "max_units", "min_abv", "max_abv", "include_member", "multi"]) {
+for (const id of ["sort", "min_units", "max_units", "min_abv", "max_abv", "include_member", "multi"]) {
   $(id).addEventListener("change", () => search(false));
 }
 
@@ -300,9 +336,22 @@ function setOptions(select, first, options) {
   select.replaceChildren(h("option", { value: "" }, first), ...options.map(([value, label]) => h("option", { value }, label)));
   if (options.some(([value]) => String(value) === keep)) select.value = keep;
 }
+function selectedTypes() {
+  return [...document.querySelectorAll("#type-options input:checked")].map((i) => i.value);
+}
+function typeSummary() {
+  const on = selectedTypes();
+  $("type-summary").textContent = !on.length ? "All types" : on.length <= 2 ? on.join(", ") : on.length + " types";
+}
 function fillFacets(facets) {
   if (!facets) return;
-  setOptions($("type"), "All types", facets.types.map((t) => [t.type, `${t.type} (${t.count})`]));
+  const keep = new Set(selectedTypes());
+  $("type-options").replaceChildren(...facets.types.map((t) => {
+    const box = h("input", { type: "checkbox", value: t.type, checked: keep.has(t.type) });
+    box.addEventListener("change", () => { typeSummary(); search(false); });
+    return h("label", { class: "opt" }, box, t.type, h("span", { class: "count" }, "(" + t.count + ")"));
+  }));
+  typeSummary();
   const units = facets.units.map((u) => [u, u === 1 ? "1 (single)" : String(u)]);
   setOptions($("min_units"), "Min: any", units);
   setOptions($("max_units"), "Max: any", units);
@@ -322,9 +371,19 @@ function buildStaticFilters() {
     });
     return chip;
   }));
+  $("type-clear").addEventListener("click", () => {
+    document.querySelectorAll("#type-options input").forEach((i) => { i.checked = false; });
+    typeSummary();
+    search(false);
+  });
+  // the type list closes when you click elsewhere or press Escape
+  document.addEventListener("click", (e) => { if (!$("type").contains(e.target)) $("type").open = false; });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("type").open = false; });
   $("clear").addEventListener("click", () => {
     $("q").value = "";
-    for (const id of ["type", "min_units", "max_units", "min_abv", "max_abv"]) $(id).value = "";
+    for (const id of ["min_units", "max_units", "min_abv", "max_abv"]) $(id).value = "";
+    document.querySelectorAll("#type-options input").forEach((i) => { i.checked = false; });
+    typeSummary();
     $("sort").value = "value";
     $("include_member").checked = true;
     $("multi").checked = false;

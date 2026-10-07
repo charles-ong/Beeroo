@@ -44,9 +44,16 @@
   <section id="filters" class="filters" hidden aria-label="Filters">
     <div class="frow">
       <label class="f grow">Search <input id="q" type="search" placeholder="e.g. carlton dry"></label>
-      <label class="f">Type of beer
-        <select id="type"><option value="">All types</option></select>
-      </label>
+      <div class="f">
+        <span id="type-label">Type of beer</span>
+        <details id="type" class="multi">
+          <summary aria-labelledby="type-label type-summary"><span id="type-summary">All types</span></summary>
+          <div class="panel" role="group" aria-labelledby="type-label">
+            <button id="type-clear" type="button" class="link">Clear selection</button>
+            <div id="type-options"></div>
+          </div>
+        </details>
+      </div>
       <label class="f">Sort by
         <select id="sort">
           <option value="value">Best value ($/standard drink)</option>

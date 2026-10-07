@@ -37,6 +37,8 @@ CREATE TABLE IF NOT EXISTS listings (
     category TEXT,
     abv REAL,
     unit_volume_ml REAL,
+    rating REAL,
+    review_count INTEGER,
     product_id INTEGER REFERENCES products(id),
     match_confidence REAL,
     first_seen TEXT NOT NULL,
@@ -68,7 +70,20 @@ def connect(path=":memory:"):
     if path != ":memory:":
         conn.execute("PRAGMA journal_mode = WAL")  # readers don't block the writer
     conn.executescript(SCHEMA)
+    _migrate(conn)
     return conn
+
+
+# Columns added after the first release: older databases (e.g. the one on the data branch) get them here.
+_ADDED_COLUMNS = [("listings", "rating", "REAL"), ("listings", "review_count", "INTEGER")]
+
+
+def _migrate(conn):
+    for table, column, kind in _ADDED_COLUMNS:
+        have = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in have:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {kind}")
+    conn.commit()
 
 
 def upsert_location(conn, location):
@@ -102,8 +117,8 @@ def upsert_listing(conn, listing, now):
         """
         INSERT INTO listings
             (retailer, retailer_sku, url, name, brand, category, abv,
-             unit_volume_ml, first_seen, last_seen)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             unit_volume_ml, rating, review_count, first_seen, last_seen)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT (retailer, retailer_sku) DO UPDATE SET
             url = excluded.url,
             name = excluded.name,
@@ -111,6 +126,9 @@ def upsert_listing(conn, listing, now):
             category = COALESCE(excluded.category, category),
             abv = COALESCE(excluded.abv, abv),
             unit_volume_ml = COALESCE(excluded.unit_volume_ml, unit_volume_ml),
+            -- a source that reports review counts (even 0) replaces the old figures; one that doesn't leaves them
+            rating = CASE WHEN excluded.review_count IS NOT NULL THEN excluded.rating ELSE rating END,
+            review_count = COALESCE(excluded.review_count, review_count),
             last_seen = excluded.last_seen
         """,
         (
@@ -122,6 +140,8 @@ def upsert_listing(conn, listing, now):
             listing.category,
             listing.abv,
             listing.unit_volume_ml,
+            listing.rating,
+            listing.review_count,
             now,
             now,
         ),
@@ -222,6 +242,8 @@ def load_listings(conn):
                 category=row["category"],
                 abv=row["abv"],
                 unit_volume_ml=row["unit_volume_ml"],
+                rating=row["rating"],
+                review_count=row["review_count"],
             ),
         )
         for row in rows

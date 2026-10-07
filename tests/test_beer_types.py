@@ -37,7 +37,10 @@ def test_display_name_never_returns_nothing():
     ("Pirate Life IPA 6.8% Can", 6.8, "IPA"),
     ("Mountain Culture Juice Trip Hazy Can", 7.0, "IPA"),
     ("Coopers Sparkling Ale Bottles", 5.8, "Ale"),
-    ("Victoria Bitter 3.5% Block Can", 3.5, "Ale"),
+    ("Victoria Bitter 3.5% Block Can", 3.5, "Lager"),                # VB is a lager despite its name
+    ("Victoria Bitter Lager Bottles", 4.9, "Lager"),
+    ("XXXX Bitter Block Can", 4.4, "Ale"),
+    ("Amber Lager Can", 4.5, "Lager"),
     ("Guinness Stout Bottle", 4.2, "Stout & Porter"),
     ("Shambles Big Guy Porter Can", 6.0, "Stout & Porter"),
     ("Weihenstephaner Hefe Bottle", 5.4, "Wheat Beer"),
@@ -48,6 +51,14 @@ def test_display_name_never_returns_nothing():
     ("Stones Ginger Joe Bottle", 8.0, "Ginger Beer"),
     ("Smirnoff Vodka Seltzer Can", 5.0, "Other"),
     ("Asahi 0.0% Bottle", 0.0, "Non-Alcoholic"),
+    ("Carlton Zero Can", None, "Non-Alcoholic"),                    # "Zero" on its own means alcohol-free
+    ("Carlton Zero Bottle", None, "Non-Alcoholic"),
+    ("Carlton Zero Zero Non Alcoholic Beer Bottles", None, "Non-Alcoholic"),
+    ("Hahn Ultra Zero Carb Cans", 4.2, "Lager"),                    # ...but "Zero Carb" / "Zero Sugar" are ordinary beers
+    ("Tradie Zero Carb Pale Ale Can", None, "Pale Ale"),
+    ("Brookvale Union Zero Sugar Ginger Beer Can", None, "Ginger Beer"),
+    ("Heineken Zero Sugar Bottle", None, "Lager"),
+    ("Hahn Super Dry Zero", 3.5, "Lager"),                          # a known ABV above 0.5 beats the word
     ("Mornington Free Non-Alc Pale Ale Can", None, "Non-Alcoholic"),
     ("Weihenstephaner Alco Free Hefe Btl", None, "Non-Alcoholic"),
     ("Heaps Normal Quiet Xpa Cans", 0.5, "Non-Alcoholic"),         # by ABV

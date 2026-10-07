@@ -74,6 +74,18 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .f.grow { flex:1 1 220px; }
 .f select { min-width:11rem; }
 .hint { font-weight:400; }
+.multi { position:relative; }
+.multi summary { list-style:none; cursor:pointer; min-height:44px; min-width:11rem; display:flex; align-items:center; justify-content:space-between; gap:10px;
+  background:var(--card); border:1px solid var(--line); border-radius:9px; padding:.5rem .65rem; color:var(--ink); font-weight:400; font-size:1rem; }
+.multi summary::-webkit-details-marker { display:none; }
+.multi summary::after { content:"\25BE"; color:var(--muted); }
+.multi[open] summary { border-color:var(--accent); }
+.multi .panel { position:absolute; z-index:20; left:0; top:calc(100% + 4px); min-width:100%; width:max-content; max-width:min(22rem,90vw); max-height:20rem; overflow:auto;
+  background:var(--card); border:1px solid var(--accent); border-radius:10px; padding:6px 8px; box-shadow:0 10px 30px rgba(60,25,0,.28); }
+.multi .panel button.link { padding:.3rem .2rem; min-height:32px; font-size:.85rem; }
+.opt { display:flex; align-items:center; gap:8px; min-height:38px; font-size:.95rem; font-weight:500; color:var(--ink); cursor:pointer; white-space:nowrap; }
+.opt input { min-height:auto; width:18px; height:18px; accent-color:var(--accent); }
+.opt .count { color:var(--muted); font-weight:400; font-size:.85rem; }
 .pair .two { display:flex; align-items:center; gap:6px; }
 .pair select { min-width:6.6rem; }
 .to { color:var(--muted); font-weight:400; }
@@ -97,6 +109,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
 .meta { color:var(--muted); font-size:.85rem; display:flex; flex-wrap:wrap; align-items:center; gap:4px 8px; }
 .badge { display:inline-block; font-size:.75rem; padding:1px 8px; border-radius:99px; border:1px solid var(--line); background:var(--card); }
 .badge.kind { background:var(--accent-soft); border-color:transparent; color:var(--accent); font-weight:700; }
+.rating { display:inline-flex; align-items:center; gap:5px; font-size:.85rem; color:var(--ink); font-weight:700; }
+.rating .count { color:var(--muted); font-weight:400; }
+.stars { position:relative; display:inline-block; white-space:nowrap; letter-spacing:1px; line-height:1; color:var(--line); font-size:.95rem; }
+.stars .fill { position:absolute; left:0; top:0; overflow:hidden; color:#f2a516; }
+.reviews { display:grid; gap:8px; margin:10px 0 4px; }
+.reviews .big { display:flex; align-items:center; flex-wrap:wrap; gap:6px 12px; font-size:1.05rem; }
+.reviews .big .num { font-size:1.9rem; font-weight:800; line-height:1; }
+.reviews .stars { font-size:1.25rem; }
 .badge.warn { background:var(--warn-bg); color:var(--warn); border-color:transparent; }
 .cell { border:1px solid var(--line); border-radius:9px; padding:8px; display:flex; flex-direction:column; gap:2px; min-width:0; background:var(--bg); }
 .cell.best { border-color:var(--good); background:var(--good-bg); }

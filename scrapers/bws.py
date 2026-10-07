@@ -7,6 +7,7 @@ with one shelf `Price` per product. ABV is in AdditionalDetails "alcohol%".
 import re
 
 from common.records import (
+    clean_rating,
     pack_type_for_units,
     Listing,
     Location,
@@ -208,6 +209,10 @@ def parse_item(item, location_key, observed_at):
         str(details.get("liquorsize") or base.get("PackageSize") or "")
     )
 
+    # the pack variants of one item share their reviews; take the most-reviewed figure
+    rated = max(products, key=lambda p: p.get("NumberOfReviews") or 0)
+    rating, review_count = clean_rating(rated.get("OverallRating"), rated.get("NumberOfReviews"))
+
     listing = Listing(
         retailer=Retailer.BWS,
         retailer_sku=parent,
@@ -217,6 +222,8 @@ def parse_item(item, location_key, observed_at):
         category="beer",
         abv=abv,
         unit_volume_ml=volume,
+        rating=rating,
+        review_count=review_count,
     )
 
     return ScrapedProduct(
@@ -274,7 +281,8 @@ def location_from_set_pickup(payload):
     )
 
 
-_KEEP_PRODUCT = ("Stockcode", "Price", "Name", "UrlFriendlyName", "IsAvailable", "PackageSize", "BrandName", "PromotionType")
+_KEEP_PRODUCT = ("Stockcode", "Price", "Name", "UrlFriendlyName", "IsAvailable", "PackageSize", "BrandName", "PromotionType",
+                 "OverallRating", "NumberOfReviews")
 _KEEP_DETAILS = {"productunitquantity", "alcohol%", "liquorsize", "brand_name", "webpacktype"}
 
 

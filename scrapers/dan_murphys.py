@@ -200,8 +200,15 @@ async def load_all_pages(page, collector, max_pages=MAX_PAGES):
 
 _CARDS_JS = """() => [...document.querySelectorAll('shop-product-card')].map(card => {
   const link = card.querySelector('a[href*="/product/"]');
+  const stars = card.querySelector('shop-star-rating');
+  let rating = null;
+  if (stars) {
+    const partial = stars.querySelector('.half-star-rating');
+    rating = Math.round((stars.querySelectorAll('.rating-icon.checked').length
+      + (partial ? parseFloat(partial.style.width) / 100 || 0 : 0)) * 100) / 100;
+  }
   return {href: link ? link.getAttribute('href') : (card.getAttribute('data-url') || ''),
-          lines: card.innerText.split('\\n')};
+          rating: rating, lines: card.innerText.split('\\n')};
 })"""
 
 

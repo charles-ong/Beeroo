@@ -101,6 +101,7 @@ def resolve_locations(conn, state):
 _LATEST_OPTIONS_SQL = """
 SELECT l.id AS listing_id, l.retailer_sku, l.url, l.name AS lname,
        l.abv AS labv, l.unit_volume_ml AS lvol, l.product_id,
+       l.rating AS lrating, l.review_count AS lreviews,
        p.name AS pname, p.brand AS pbrand, p.abv AS pabv,
        p.abv_source, p.unit_volume_ml AS pvol,
        o.pack_type, o.units, o.member_only, o.price, o.observed_at
@@ -193,7 +194,8 @@ def load_products(conn, locations, now=None):
             )
             entry = product["retailers"].setdefault(
                 retailer,
-                {"url": row["url"], "sku": row["retailer_sku"], "options": []},
+                {"url": row["url"], "sku": row["retailer_sku"], "options": [],
+                 "rating": row["lrating"], "review_count": row["lreviews"]},
             )
             entry["options"].append(_option(row, abv, source, volume, now))
 
@@ -202,8 +204,22 @@ def load_products(conn, locations, now=None):
             _finish_entry(entry)
 
         _mark_best(product)
+        product["rating"], product["review_count"] = combined_rating(product["retailers"].values())
 
     return list(products.values())
+
+
+def combined_rating(entries):
+    """One average across retailers, weighted by how many reviews each has
+    (reviews are of the same beer, so they pool). (None, 0) if nobody has any."""
+    rated = [e for e in entries if e.get("rating")]
+    weights = [e.get("review_count") or 1 for e in rated]
+
+    if not rated:
+        return None, 0
+
+    average = sum(e["rating"] * w for e, w in zip(rated, weights)) / sum(weights)
+    return round(average, 2), sum(e.get("review_count") or 0 for e in rated)
 
 
 def refilter(products, include_member=True, min_units=None, max_units=None):

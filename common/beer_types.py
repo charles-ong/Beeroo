@@ -16,7 +16,9 @@ _NON_ALC_ABV = 0.5
 
 # (type, regex) in priority order; the first match wins.
 _RULES = [
-    ("Non-Alcoholic", r"\bnon[- ]?alc|alco(?:hol)?[- ]?free|\b0\.0\b|\b0%|\bzero zero\b|\bdealcoholi[sz]ed\b|\bunfiltered 0\b"),
+    # "Zero" on its own means alcohol-free ("Carlton Zero"); "Zero Carb" / "Zero Sugar" are ordinary beers.
+    ("Non-Alcoholic", r"\bnon[- ]?alc|alco(?:hol)?[- ]?free|\b0\.0\b|\b0%|\bdealcoholi[sz]ed\b"
+                      r"|\bzero\b(?!\s+(?:carbs?|sugars?|calories?|cals?|gluten)\b)"),
     ("Cider", r"\bcider\b|\bperry\b|\bhard apple\b"),
     ("Ginger Beer", r"\bginger beer\b|\bginger\b"),
     ("Other", r"\bseltzer\b|\bvodka\b|\bgin\b|\bspritz\b|\bmargarita\b|\bcocktail\b|\bwhisky\b|\bbourbon\b|\brum\b|\bkombucha\b|\bhard (?:lemonade|iced tea|tea|soda)\b"),
@@ -25,8 +27,10 @@ _RULES = [
     ("Wheat Beer", r"\bwheat\b|\bweizen\b|\bweiss\b|\bweisse\b|\bwit(?:bier)?\b|\bhefe\b|\bwhite ale\b|\bwhite beer\b"),
     ("IPA", r"\bipa\b|\bindia pale\b|\bneipa\b|\bdipa\b|\btipa\b"),
     ("Pale Ale", r"\bpale ale\b|\bxpa\b|\bapa\b|\bgolden ale\b|\bsummer ale\b|\bsession ale\b|\bpacific ale\b|\bpale\b"),
-    ("Ale", r"\bale\b|\bamber\b|\bbitter\b|\bbrown\b|\bred\b|\bsaison\b|\bbelgian\b|\bbarleywine\b|\bdubbel\b|\btripel\b|\bquad(?:rupel)?\b|\bscotch\b|\besb\b"),
     ("Pilsner", r"\bpilsner\b|\bpilsener\b|\bpils\b|\bpilsen\b"),
+    # an explicit "lager" beats the loose ale words ("Victoria Bitter Lager", "Amber Lager"); VB is a lager despite its name
+    ("Lager", r"\blager\b|\bvictoria bitter\b|\bvb\b"),
+    ("Ale", r"\bale\b|\bamber\b|\bbitter\b|\bbrown\b|\bred\b|\bsaison\b|\bbelgian\b|\bbarleywine\b|\bdubbel\b|\btripel\b|\bquad(?:rupel)?\b|\bscotch\b|\besb\b"),
     ("IPA", r"\bhazy\b|\bjuicy\b"),
 ]
 _COMPILED = [(t, re.compile(rx, re.I)) for t, rx in _RULES]
@@ -57,6 +61,8 @@ def beer_type(name, abv=None):
         return "Non-Alcoholic"
     text = name or ""
     for kind, rx in _COMPILED:
+        if kind == "Non-Alcoholic" and abv is not None:
+            continue                      # a known ABV above 0.5 beats a name that merely says "zero"
         if rx.search(text):
             return kind
     return "Lager"

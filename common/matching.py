@@ -26,6 +26,10 @@ DESCRIPTORS = {
     "premium", "original", "cerveza", "alcoholic", "classic", "best",
 }
 DESCRIPTOR_CONFIDENCE = 0.9
+# "Carlton Zero" and "Carlton Zero Zero Non Alcoholic Beer" are one product: one retailer spells out
+# what "zero" already means. Only when the shorter name itself says zero (or its ABV is ~0): "Carlton Dry"
+# and "Carlton Dry Non Alcoholic" are different beers.
+NON_ALCOHOLIC_WORDS = {"non", "alcoholic", "alcohol", "alc", "alco", "free"}
 
 
 @dataclass(frozen=True)
@@ -84,6 +88,11 @@ def compare(sig_a, sig_b):
     if small < large:
         if (large - small) <= DESCRIPTORS:
             return DESCRIPTOR_CONFIDENCE, "descriptor subset"
+
+        small_sig = sig_a if small is sig_a.tokens else sig_b
+        says_zero = "zero" in small or (small_sig.abv is not None and small_sig.abv <= 0.5)
+        if (large - small) <= NON_ALCOHOLIC_WORDS and says_zero:
+            return DESCRIPTOR_CONFIDENCE, "descriptor subset (non-alcoholic)"
 
         return round(len(small) / len(large), 2), "name subset (review)"
 

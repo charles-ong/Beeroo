@@ -15,7 +15,7 @@ your computer, once a day:
 - `scripts/scheduled_scrape.py`: the daily scrape. [docs/SCHEDULED_SCRAPE.md](docs/SCHEDULED_SCRAPE.md)
 - `scripts/export_static.py` + `scripts/publish_pages.sh`: build and publish the site. [docs/FREE_HOSTING.md](docs/FREE_HOSTING.md)
 - `scripts/import_dm_page.py`: add Dan Murphy's prices from a page you browsed and saved yourself (no automated access). [docs/DAN_MURPHYS_MANUAL.md](docs/DAN_MURPHYS_MANUAL.md)
-- The site's filters: retailer chips (pick several), type of beer (best-effort from the product name: `common/beer_types.py`), quantity range, ABV range, member offers (on by default), search and sort. Titles hide pack size and volume (shown separately).
+- The site's filters: retailer chips (pick several), type of beer (a checkbox dropdown; best-effort from the product name: `common/beer_types.py`; "Zero" on its own means non-alcoholic), quantity range, ABV range, member offers (on by default), search and sort. Titles hide pack size and volume (shown separately). Cards and the product modal show the average star rating (pooled across retailers by review count) where the retailer publishes one.
 - `scripts/daily_run.sh`: the whole chain (what the scheduler runs). Publishes with `scripts/deploy_cloudflare.sh` (Cloudflare Pages) and/or `scripts/publish_pages.sh` (GitHub Pages).
 - `.github/workflows/daily-scrape.yml`: the daily cloud job (BWS + Liquorland on a free GitHub runner, then deploy); your Mac scrapes Dan Murphy's only. [docs/CLOUD_SCRAPE.md](docs/CLOUD_SCRAPE.md)
 - `.github/workflows/cloud-scrape-experiment.yml`: a one-click test of whether a free GitHub runner can scrape a site. [docs/SCHEDULED_SCRAPE.md](docs/SCHEDULED_SCRAPE.md#can-the-scraping-move-to-the-cloud-experiment)

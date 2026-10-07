@@ -223,3 +223,19 @@ def test_load_overrides_csv(tmp_path):
     p.write_text("action,retailer_a,sku_a,retailer_b,sku_b\nmaybe,bws,1,liquorland,2\n")
     with pytest.raises(ValueError):
         load_overrides(p)
+
+
+def test_zero_and_zero_non_alcoholic_are_the_same_beer():
+    bws = L(BWS, "1", "Carlton Zero Zero Non Alcoholic Beer Bottles 330ml", abv=0.0)
+    ll = L(LL, "2", "Carlton Zero Bottle 330mL")
+    clusters, review = match_listings([bws, ll])
+    assert len(clusters) == 1 and clusters[0].retailers == {BWS, LL} and review == []
+
+
+def test_but_a_non_alcoholic_version_of_a_regular_beer_is_not_the_regular_beer():
+    clusters, _ = match_listings([L(BWS, "1", "Carlton Dry Non Alcoholic Beer Bottles 330ml", abv=0.0),
+                                  L(LL, "2", "Carlton Dry Bottle 330mL")])
+    assert len(clusters) == 2
+    clusters, _ = match_listings([L(BWS, "1", "Carlton Zero Zero Non Alcoholic Beer Bottles 330ml", abv=0.0),
+                                  L(LL, "2", "Carlton Zero Bottle 330mL", abv=4.0)])
+    assert len(clusters) == 2                                      # a known ABV that disagrees still blocks it

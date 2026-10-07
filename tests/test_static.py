@@ -280,13 +280,29 @@ def test_new_filters_work_in_a_real_browser(site):
             assert page.locator(".chip[aria-pressed='true']").count() == 0
 
             # type of beer
-            kinds = page.eval_on_selector_all("#type option", "els => els.map(e => e.value)")
-            assert kinds[0] == "" and "Lager" in kinds and len(kinds) > 3
-            page.select_option("#type", "Lager")
+            kinds = page.eval_on_selector_all("#type-options input", "els => els.map(e => e.value)")
+            assert "Lager" in kinds and len(kinds) > 3
+            assert page.inner_text("#type-summary") == "All types" and not page.locator("#type[open]").count()
+            page.click("#type summary")                                  # a dropdown of checkboxes: tick several
+            page.wait_for_selector("#type[open] .opt")
+            page.check("#type-options input[value='Lager']")
             wait_count(f"n < {all_count}")
+            assert page.inner_text("#type-summary") == "Lager"
             assert set(page.eval_on_selector_all(".card .badge.kind", "els => els.map(e => e.textContent)")) == {"Lager"}
-            page.select_option("#type", "")
+            only_lager = count()
+            other = next(k for k in kinds if k != "Lager")
+            page.check(f"#type-options input[value='{other}']")
+            wait_count(f"n > {only_lager}")
+            assert page.inner_text("#type-summary") == f"Lager, {other}"
+            assert set(page.eval_on_selector_all(".card .badge.kind", "els => els.map(e => e.textContent)")) <= {"Lager", other}
+            page.keyboard.press("Escape")                                # closes the list, keeps the choice
+            assert not page.locator("#type[open]").count() and page.inner_text("#type-summary") == f"Lager, {other}"
+            page.click("#type summary")
+            page.click("#type-clear")
             wait_count(f"n === {all_count}")
+            assert page.inner_text("#type-summary") == "All types"
+            page.click("h1")                                             # clicking elsewhere closes it too
+            assert not page.locator("#type[open]").count()
 
             # quantity range comes from the sizes that exist
             sizes = page.eval_on_selector_all("#min_units option", "els => els.map(e => e.value).filter(Boolean)")
@@ -306,3 +322,77 @@ def test_new_filters_work_in_a_real_browser(site):
         assert problems == [], problems
     finally:
         srv.shutdown()
+
+
+@pytest.mark.skipif(not CHROMIUM.exists(), reason="cached headless Chromium not available")
+def test_reviews_show_on_cards_and_in_the_modal(site):
+    pw = pytest.importorskip("playwright.sync_api")
+    handler = partial(SimpleHTTPRequestHandler, directory=str(site["out"]))
+    handler.log_message = lambda *a, **k: None
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with pw.sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, executable_path=str(CHROMIUM))
+            page = browser.new_page(viewport={"width": 1100, "height": 900})
+            problems = []
+            page.on("console", lambda m: problems.append(m.text) if m.type in ("error", "warning") else None)
+            page.on("pageerror", lambda e: problems.append(str(e)))
+            page.goto(f"http://127.0.0.1:{srv.server_port}/")
+            page.wait_for_function("document.querySelectorAll('#state option').length === 9")
+            page.select_option("#state", "ACT")
+            page.wait_for_selector(".card")
+            # the list: an average and a count on rated products, nothing on unrated ones
+            assert page.locator(".card .rating").count() > 0
+            rated = page.locator(".card", has=page.locator(".rating")).first
+            import re as _re
+            text = rated.locator(".rating").inner_text()
+            average = _re.search(r"\d\.\d", text).group()
+            assert "(" in text and 0 < float(average) <= 5
+            assert rated.locator(".stars .fill").count() == 1
+            width = rated.locator(".stars .fill").evaluate("e => e.style.width")
+            assert width.endswith("%") and 0 < float(width[:-1]) <= 100
+            assert page.locator(".card", has_not=page.locator(".rating")).count() > 0
+            # the modal: the pooled average, then each retailer
+            rated.click()
+            page.wait_for_selector("#detail[open] .reviews")
+            assert page.locator("#detail h3", has_text="Reviews").count() == 1
+            assert page.locator("#detail .reviews .big .num").inner_text() == average
+            rows = page.locator("#detail .reviews tbody tr")
+            assert rows.count() == 3
+            body = page.inner_text("#detail .reviews")
+            assert "bws" in body.lower() and "liquorland" in body.lower() and "review" in body
+            assert "Review text isn't collected" in body
+            page.keyboard.press("Escape")
+            browser.close()
+        assert problems == [], problems
+    finally:
+        srv.shutdown()
+
+
+@pytest.mark.skipif(not CHROMIUM.exists(), reason="cached headless Chromium not available")
+def test_the_scraper_and_the_manual_snippet_read_the_stars_from_real_cards():
+    """Run both pieces of in-page JavaScript against 7 real saved cards: San Miguel shows 4 full stars and a 54.31% one."""
+    import re
+    from scrapers import dan_murphys
+    pw = pytest.importorskip("playwright.sync_api")
+    html = (ROOT / "tests/fixtures/dan_murphys_page_sample.html").read_text()
+    doc = (ROOT / "docs/DAN_MURPHYS_MANUAL.md").read_text()
+    snippet = re.search(r"```js\n\s*(copy\(.*?\))\n\s*```", doc, re.S).group(1)
+    with pw.sync_playwright() as p:
+        browser = p.chromium.launch(headless=True, executable_path=str(CHROMIUM))
+        page = browser.new_page()
+        page.set_content(html)
+        scraped = page.evaluate(dan_murphys._CARDS_JS)
+        page.evaluate("window.copy = (text) => { window.copied = text; }")
+        page.evaluate(snippet)
+        copied = json.loads(page.evaluate("window.copied"))["cards"]
+        browser.close()
+    assert len(scraped) == 7 and scraped == copied                     # the manual snippet and the scraper agree
+    san_miguel = next(c for c in scraped if "587292" in c["href"])
+    assert san_miguel["rating"] == 4.54
+    assert all(c["rating"] is None or 0 <= c["rating"] <= 5 for c in scraped)
+    from scrapers import dan_murphys_dom as dom
+    products, errors = dom.parse_cards_payload({"cards": scraped}, "k")
+    got = {p.listing.retailer_sku: (p.listing.rating, p.listing.review_count) for p in products}
+    assert got["587292"] == (4.54, 116) and errors == []

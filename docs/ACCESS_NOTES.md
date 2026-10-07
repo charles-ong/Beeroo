@@ -88,3 +88,15 @@ it one of two ways (`BEEROO_DM_METHOD`, default `auto`):
 Both go through the same store selection (nearest store to the state's postcode) and the same schema; the card
 parser keeps member and non-member prices (flagged), skips in-store-only prices and never guesses a unit count
 or ABV. Neither method helps if the site serves a bot-protection page: that is detected and the scraper backs off.
+
+## Reviews
+
+Only the **average rating and review count** are collected, from data the list pages already load (no extra
+requests per product):
+
+- **BWS**: `OverallRating` / `NumberOfReviews` on each product (the pack variants report slightly different counts; the largest is used).
+- **Dan Murphy's**: the same two fields in the Browse JSON; from the card text path, the star icons (full stars plus the partial star's width) and the "(116 REVIEWS)" text.
+- **Liquorland**: its list data has no ratings. The per-product detail endpoint does (`ratings.average` / `total`), but fetching it means one request per product per state, so it isn't done.
+
+Individual review text isn't collected: it would need a page or API request for every product. The site pools the
+retailers' averages weighted by review count (`queries.combined_rating`) and shows each retailer's own figure in the modal.
