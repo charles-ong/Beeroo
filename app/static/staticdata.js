@@ -108,7 +108,7 @@
       const name = p.raw_name.toLowerCase();
       if (tokens.length && !tokens.every((t) => name.includes(t))) return false;
       const present = Object.keys(p.retailers);
-      if (wanted && !present.some((r) => wanted.has(r))) return false;
+      if (wanted && ![...wanted].every((r) => present.includes(r))) return false;   // sold by EVERY picked retailer
       if (wantedTypes && !wantedTypes.has(p.type)) return false;
       if (present.length < minRetailers) return false;
       if (minAbv !== null || maxAbv !== null) {

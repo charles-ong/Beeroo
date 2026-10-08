@@ -318,7 +318,7 @@ def compare(conn, state, q="", sort="value", include_member=True, retailers=None
     for p in products:
         if tokens and not all(t in p["raw_name"].lower() for t in tokens):
             continue
-        if wanted and not wanted & set(p["retailers"]):
+        if wanted and not wanted <= set(p["retailers"]):      # sold by EVERY picked retailer; none picked = any
             continue
         if wanted_types and p["type"] not in wanted_types:
             continue

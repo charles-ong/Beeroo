@@ -166,12 +166,17 @@ def test_quantity_range_keeps_only_matching_pack_sizes_and_recomputes(client):
     assert none["products"] == [] and none["meta"]["total"] == 0
 
 
-def test_filter_by_one_or_more_retailers(client):
-    both = client.get("/api/compare", params={"state": "ACT", "limit": 200}).json()["meta"]["total"]
-    bws = client.get("/api/compare", params={"state": "ACT", "retailer": "bws", "limit": 200}).json()
-    assert 0 < bws["meta"]["total"] <= both and all("bws" in p["retailers"] for p in bws["products"])
-    either = client.get("/api/compare", params={"state": "ACT", "retailer": ["bws", "liquorland"], "limit": 200}).json()
-    assert either["meta"]["total"] == both               # ACT has only those two retailers
+def test_retailer_filter_means_available_at_every_picked_retailer(client):
+    get = lambda **kw: client.get("/api/compare", params={"state": "ACT", "limit": 200, **kw}).json()
+    everything = get()
+    bws, ll = get(retailer="bws"), get(retailer="liquorland")
+    both = get(retailer=["bws", "liquorland"])
+    assert 0 < bws["meta"]["total"] < everything["meta"]["total"]
+    assert all("bws" in p["retailers"] for p in bws["products"])
+    assert both["meta"]["total"] < min(bws["meta"]["total"], ll["meta"]["total"])      # narrower than either alone
+    assert both["products"] and all({"bws", "liquorland"} <= set(p["retailers"]) for p in both["products"])
+    assert {p["id"] for p in both["products"]} == {p["id"] for p in bws["products"]} & {p["id"] for p in ll["products"]}
+    assert get(retailer=["bws", "dan_murphys"])["meta"]["total"] == 0                   # ACT has no Dan Murphy's data
 
 
 def test_filter_by_type_and_facets_list_what_exists(client):

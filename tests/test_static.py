@@ -272,9 +272,15 @@ def test_new_filters_work_in_a_real_browser(site):
             wait_count(f"n < {all_count}")
             assert chips.nth(1).get_attribute("aria-pressed") == "true"
             only_bws = count()
-            chips.nth(2).click()                                    # + Liquorland
-            wait_count(f"n > {only_bws}")
-            assert count() == all_count                             # ACT has just those two
+            chips.nth(2).click()                                    # + Liquorland: now only products sold by BOTH
+            wait_count(f"n < {only_bws}")
+            both = count()
+            assert 0 < both < only_bws
+            chips.nth(0).click()                                    # + Dan Murphy's (ACT has none): nothing sells at all three
+            wait_count("n === 0")
+            chips.nth(0).click()
+            chips.nth(1).click()                                    # BWS off again: Liquorland alone
+            wait_count(f"n !== {both}")
             page.locator("#clear").click()
             wait_count(f"n === {all_count}")
             assert page.locator(".chip[aria-pressed='true']").count() == 0
