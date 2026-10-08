@@ -15,7 +15,11 @@ RETAILER_NAMES = {
     "liquorland": "Liquorland",
 }
 STALE_DAYS = 7
-SORTS = {"value", "unit_price", "abv", "name"}
+SORTS = {"value", "unit_price", "abv", "rating", "name"}
+# "Highest rated" pulls ratings with few reviews toward 4.0, so one 5-star review doesn't outrank 4.6 from 300.
+# (Mirrored in app/static/staticdata.js.)
+RATING_PRIOR = 4.0
+RATING_PRIOR_WEIGHT = 5
 
 
 def _parse(ts):
@@ -209,6 +213,12 @@ def load_products(conn, locations, now=None):
     return list(products.values())
 
 
+def rating_score(product):
+    """What "highest rated" sorts by: the rating, nudged toward the prior when there are few reviews."""
+    votes = product.get("review_count") or 1
+    return (product["rating"] * votes + RATING_PRIOR * RATING_PRIOR_WEIGHT) / (votes + RATING_PRIOR_WEIGHT)
+
+
 def combined_rating(entries):
     """One average across retailers, weighted by how many reviews each has
     (reviews are of the same beer, so they pool). (None, 0) if nobody has any."""
@@ -330,6 +340,7 @@ def compare(conn, state, q="", sort="value", include_member=True, retailers=None
         "unit_price": lambda p: (p["min_unit_price"] is None,
                                  p["min_unit_price"] or INF, p["name"]),
         "abv": lambda p: (p["abv"] is None, -(p["abv"] or 0), p["name"]),
+        "rating": lambda p: (p["rating"] is None, -(rating_score(p) if p["rating"] else 0), p["name"]),
         "name": lambda p: p["name"].lower(),
     }
     result.sort(key=keys[sort])

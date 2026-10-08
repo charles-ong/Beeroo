@@ -14,6 +14,12 @@
   }
 
   const INF = Infinity;
+  // "Highest rated": ratings with few reviews are pulled toward the prior (same constants as app/queries.py).
+  const RATING_PRIOR = 4.0, RATING_PRIOR_WEIGHT = 5;
+  const ratingScore = (p) => {
+    const votes = p.review_count || 1;
+    return (p.rating * votes + RATING_PRIOR * RATING_PRIOR_WEIGHT) / (votes + RATING_PRIOR_WEIGHT);
+  };
   const lt = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
   // Same ordering as queries.compare: unknown values last, then by name.
@@ -23,6 +29,8 @@
     unit_price: (a, b) => lt(a.min_unit_price == null, b.min_unit_price == null)
       || lt(a.min_unit_price ?? INF, b.min_unit_price ?? INF) || lt(a.name, b.name),
     abv: (a, b) => lt(a.abv == null, b.abv == null) || lt(-(a.abv || 0), -(b.abv || 0)) || lt(a.name, b.name),
+    rating: (a, b) => lt(!a.rating, !b.rating) || lt(-(a.rating ? ratingScore(a) : 0), -(b.rating ? ratingScore(b) : 0))
+      || lt(a.name, b.name),
     name: (a, b) => lt(a.name.toLowerCase(), b.name.toLowerCase()),
   };
 

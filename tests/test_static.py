@@ -91,7 +91,7 @@ def test_nothing_is_exported_for_an_empty_database(tmp_path):
 
 def make_cases():
     cases = []
-    for sort, member, q, minr in itertools.product(["value", "unit_price", "abv", "name"], [False, True], ["", "carlton dry"], [1, 2]):
+    for sort, member, q, minr in itertools.product(["value", "unit_price", "abv", "rating", "name"], [False, True], ["", "carlton dry"], [1, 2]):
         cases.append({"sort": sort, "member": member, "q": q, "min_retailers": minr})
     # the new filters, alone and combined
     extra = [

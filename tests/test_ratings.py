@@ -177,3 +177,46 @@ def test_detail_and_static_export_carry_the_ratings(tmp_path):
     export_static.export(conn, tmp_path / "site", ["ACT"], NOW)
     exported = json.loads((tmp_path / "site" / "data" / "ACT" / "products.json").read_text())["products"][0]
     assert exported["rating"] == 4.25 and exported["retailers"]["bws"]["review_count"] == 300
+
+
+# ---- sorting by rating ----------------------------------------------------------------------
+
+
+def test_rating_score_pulls_thin_ratings_toward_the_prior():
+    five_from_one = queries.rating_score({"rating": 5.0, "review_count": 1})
+    solid = queries.rating_score({"rating": 4.6, "review_count": 300})
+    assert solid > five_from_one                                          # one 5-star review doesn't win
+    assert queries.rating_score({"rating": 4.0, "review_count": 3}) == 4.0   # the prior itself is unmoved
+    assert queries.rating_score({"rating": 5.0, "review_count": 1000}) > 4.95
+    assert queries.rating_score({"rating": 3.0, "review_count": None}) > 3.0       # unknown count: counted as one review
+
+
+def seeded_ratings(tmp_path, rows):
+    from common.pipeline import run_matching
+    from common.records import Location, PackType, PriceObservation
+    conn = db.connect(str(tmp_path / "s.sqlite3"))
+    loc = Location(retailer=Retailer.BWS, store_id="1", state="ACT", postcode="2600")
+    db.upsert_location(conn, loc)
+    for i, (name, rating, reviews) in enumerate(rows):
+        item = listing(retailer_sku=str(i), url=f"https://x/{i}", name=name, rating=rating, review_count=reviews)
+        obs = PriceObservation(pack_type=PackType.PACK, units=6, price=20.0, location_key=loc.location_key, observed_at=NOW)
+        db.save_products(conn, [ScrapedProduct(listing=item, prices=[obs])], NOW)
+    run_matching(conn)
+    return conn
+
+
+def test_sort_by_rating_ranks_by_score_with_unrated_last(tmp_path):
+    conn = seeded_ratings(tmp_path, [
+        ("Alpha Pale Ale Cans 375ml", 5.0, 1), ("Bravo Stout Cans 375ml", 4.6, 300), ("Charlie IPA Cans 375ml", 4.1, 50),
+        ("Delta Lager Cans 375ml", None, None), ("Echo Porter Cans 375ml", 4.6, 300)])
+    names = [p["name"] for p in queries.compare(conn, "ACT", sort="rating", now=NOW)["products"]]
+    assert names == ["Bravo Stout Cans", "Echo Porter Cans", "Alpha Pale Ale Cans", "Charlie IPA Cans", "Delta Lager Cans"]
+    assert queries.compare(conn, "ACT", sort="rating", now=NOW)["products"][0]["rating"] == 4.6
+
+
+def test_rating_is_an_accepted_sort_over_http(tmp_path):
+    from fastapi.testclient import TestClient
+    from app.main import create_app
+    seeded_ratings(tmp_path, [("Alpha Pale Ale Cans 375ml", 4.0, 10)]).close()
+    client = TestClient(create_app(str(tmp_path / "s.sqlite3")))
+    assert client.get("/api/compare", params={"state": "ACT", "sort": "rating"}).status_code == 200
