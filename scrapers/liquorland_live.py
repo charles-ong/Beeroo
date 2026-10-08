@@ -198,10 +198,10 @@ async def scrape(page, postcode, max_pages=MAX_PAGES, raw_pages=None, expected_s
                 seen.add(p.get("id"))
                 unique.append(p)
     merged = {"debugQuery": f"sitestate={site}", "products": unique}
-    location = liquorland.location_for_site(site)
+    location = liquorland.location_for_site(site, store_name)
     products, errors = liquorland.parse_liquorland_payload(merged, location.location_key, utcnow())
     if raw_pages is not None:
-        raw_pages.extend(liquorland.minimal_payload(pg) for pg in pages)
+        raw_pages.extend({**liquorland.minimal_payload(pg), "store_name": location.store_name} for pg in pages)
     # `collected` = list entries gathered (each pack variant is an entry), the
     # unit the site's total is counted in; products are those entries merged by SKU.
     return location, products, errors, collector.total or len(unique), {"collected": len(unique)}

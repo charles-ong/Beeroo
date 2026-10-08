@@ -147,15 +147,23 @@ function card(p) {
   node.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); } });
   return node;
 }
+// "Canberra Airport, Majura (ACT)": where a retailer's prices were collected. Liquorland prices are
+// state-wide; the store named is the nearest one the visit picked.
+function storeLabel(r, l) {
+  const raw = (l.store_name || "").trim();
+  if (!raw || /\(state pricing\)$/i.test(raw)) return `state-wide pricing (${l.state})`;
+  const escaped = r.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let name = raw.replace(new RegExp("^" + escaped + "\\s+", "i"), "") || raw;
+  if (l.suburb && !name.toLowerCase().includes(l.suburb.toLowerCase())) name += ", " + l.suburb;
+  return r.id === "liquorland" ? `${name} (${l.state}, state-wide prices)` : `${name} (${l.state})`;
+}
 function renderLocations(loc) {
   if (loc.postcode) $("state-postcode").textContent = loc.postcode + " (" + loc.state_name + ")";
   $("notices").replaceChildren(...loc.notices.map((n) => h("div", { class: "banner notice" }, n)));
   const parts = RETAILERS.map((r) => {
     const l = loc.retailers[r.id];
     if (!l) return null;
-    const name = l.store_name ? l.store_name + (l.suburb && !l.store_name.includes(l.suburb) ? ", " + l.suburb : "") : l.state + " pricing";
-    const where = name.includes(l.state) ? name : `${name} (${l.state})`;
-    return `${r.name}: ${where}`;
+    return `${r.name}: ${storeLabel(r, l)}`;
   }).filter(Boolean);
   $("stores").textContent = parts.length ? "Prices from — " + parts.join(" · ") : "";
 }
@@ -253,7 +261,7 @@ function reviewsSection(p) {
     : h("p", { class: "sub" }, "No ratings yet for this product.");
   return h("div", { class: "reviews" }, head,
     h("div", { class: "tbl" }, h("table", {}, h("tbody", {}, rows))),
-    h("p", { class: "sub" }, "Average ratings as shown by each retailer, pooled by number of reviews. Review text isn't collected."));
+    h("p", { class: "sub" }, "Average ratings as shown by each retailer, pooled by number of reviews."));
 }
 function detailBody(d) {
   const p = d.product;

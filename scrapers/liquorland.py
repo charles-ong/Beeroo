@@ -37,13 +37,21 @@ def site_state(payload):
     return match.group(1) if match else None
 
 
-def location_for_site(site):
-    """State-level Location, e.g. 'll_wa' -> key 'liquorland:ll_wa'."""
+def clean_store_name(value):
+    """The store the scraper picked in the location modal, made safe to show (None if unusable)."""
+    text = re.sub(r"[\x00-\x1f\x7f<>]", " ", str(value or ""))
+    text = re.sub(r"\s+", " ", text).strip()[:80]
+    return text or None
+
+
+def location_for_site(site, store_name=None):
+    """State-level Location, e.g. 'll_wa' -> key 'liquorland:ll_wa'. Prices are per state, but
+    `store_name` (the nearest store the scraper picked) says which store the visit used."""
     state = site.split("_", 1)[-1].upper()
     return Location(
         retailer=Retailer.LIQUORLAND,
         store_id=site,
-        store_name=f"Liquorland {state} (state pricing)",
+        store_name=clean_store_name(store_name) or f"Liquorland {state} (state pricing)",
         state=state,
     )
 

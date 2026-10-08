@@ -125,3 +125,29 @@ def test_requires_location_when_response_has_none():
 def test_suburb_search():
     rows = parse_suburb_search(load("liquorland_suburb_search_2606.json"))
     assert ("Woden", "ACT", "2606") in rows
+
+
+# ---- which store the visit used -----------------------------------------------------------------
+
+
+def test_location_names_the_store_the_visit_picked_and_falls_back_to_state_pricing():
+    from scrapers.liquorland import clean_store_name
+    assert location_for_site("ll_act", "Liquorland Woden").store_name == "Liquorland Woden"
+    assert location_for_site("ll_act").store_name == "Liquorland ACT (state pricing)"
+    assert location_for_site("ll_act", "  ").store_name == "Liquorland ACT (state pricing)"
+    assert location_for_site("ll_act", "Woden").location_key == "liquorland:ll_act"      # the key never changes
+    assert clean_store_name("  Wo\nden <b>Plaza</b>\t") == "Wo den b Plaza /b"
+    assert len(clean_store_name("x" * 500)) == 80 and clean_store_name(None) is None
+
+
+def test_ingest_uses_the_store_name_sent_with_the_page():
+    import json as _json
+    from app import ingest
+    from common import db
+    page = _json.loads((Path(__file__).parent / "fixtures" / "liquorland_act_products.json").read_text())
+    conn = db.connect()
+    body = ingest.IngestIn.model_validate({"kind": "liquorland_products", "payload": {**page, "store_name": "Liquorland Woden"}})
+    ingest.ingest_trusted(conn, body)
+    assert conn.execute("SELECT store_name FROM locations").fetchone()[0] == "Liquorland Woden"
+    ingest.ingest_trusted(conn, ingest.IngestIn.model_validate({"kind": "liquorland_products", "payload": page}))
+    assert conn.execute("SELECT store_name FROM locations").fetchone()[0] == "Liquorland ACT (state pricing)"   # no name sent: placeholder

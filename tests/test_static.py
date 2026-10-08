@@ -386,7 +386,7 @@ def test_reviews_show_on_cards_and_in_the_modal(site):
             assert rows.count() == 3
             body = page.inner_text("#detail .reviews")
             assert "bws" in body.lower() and "liquorland" in body.lower() and "review" in body
-            assert "Review text isn't collected" in body
+            assert "pooled by number of reviews" in body
             page.keyboard.press("Escape")
             browser.close()
         assert problems == [], problems
@@ -420,3 +420,47 @@ def test_the_scraper_and_the_manual_snippet_read_the_stars_from_real_cards():
     products, errors = dom.parse_cards_payload({"cards": scraped}, "k")
     got = {p.listing.retailer_sku: (p.listing.rating, p.listing.review_count) for p in products}
     assert got["587292"] == (4.54, 116) and errors == []
+
+
+@pytest.mark.skipif(not CHROMIUM.exists(), reason="cached headless Chromium not available")
+def test_prices_from_line_names_the_actual_stores(site, tmp_path):
+    """The line under the banner names where each retailer's prices came from, not a placeholder."""
+    import shutil as _shutil
+    copy = tmp_path / "site"
+    _shutil.copytree(site["out"], copy)
+    path = copy / "data" / "ACT" / "products.json"
+    payload = json.loads(path.read_text())
+    stores = payload["locations"]["retailers"]
+    stores["dan_murphys"] = {**(stores["dan_murphys"] or {"location_key": "dan_murphys:1462", "latest": "2026-10-08T14:45:00+00:00"}),
+                             "store_name": "Canberra Airport", "suburb": "Majura", "state": "ACT", "postcode": "2609"}
+    stores["bws"] = {**stores["bws"], "store_name": "Kingston", "suburb": "Kingston", "state": "ACT"}
+    stores["liquorland"] = {**stores["liquorland"], "store_name": "Liquorland Woden", "suburb": None, "state": "ACT"}
+    path.write_text(json.dumps(payload))
+
+    pw = pytest.importorskip("playwright.sync_api")
+    handler = partial(SimpleHTTPRequestHandler, directory=str(copy))
+    handler.log_message = lambda *a, **k: None
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    try:
+        with pw.sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, executable_path=str(CHROMIUM))
+            page = browser.new_page()
+            page.goto(f"http://127.0.0.1:{srv.server_port}/")
+            page.wait_for_function("document.querySelectorAll('#state option').length === 9")
+            page.select_option("#state", "ACT")
+            page.wait_for_selector(".card")
+            line = page.inner_text("#stores")
+            assert line == ("Prices from — Dan Murphy's: Canberra Airport, Majura (ACT) · BWS: Kingston (ACT) · "
+                            "Liquorland: Woden (ACT, state-wide prices)")
+            # a state-level placeholder (no store known yet) is described as what it is
+            stores["liquorland"]["store_name"] = "Liquorland ACT (state pricing)"
+            path.write_text(json.dumps(payload))
+            page.reload()
+            page.select_option("#state", "ACT")
+            page.wait_for_selector(".card")
+            assert "Liquorland: state-wide pricing (ACT)" in page.inner_text("#stores")
+            assert "imported by hand" not in page.inner_text("#stores")
+            browser.close()
+    finally:
+        srv.shutdown()

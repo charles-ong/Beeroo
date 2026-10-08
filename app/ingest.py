@@ -45,7 +45,7 @@ def resolve_location(kind, location, payload):
         site = liquorland.site_state(payload)
         if site is None:
             raise IngestError(422, "parse: Liquorland response has no site state")
-        return liquorland.location_for_site(site)
+        return liquorland.location_for_site(site, payload.get("store_name"))
 
     if location is None:
         raise IngestError(422, "location is required for this kind of payload")
