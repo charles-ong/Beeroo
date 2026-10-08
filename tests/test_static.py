@@ -104,13 +104,17 @@ def make_cases():
     ]
     for e in extra:
         cases.append({"sort": "value", "member": True, "q": "", "min_retailers": 1, **e})
+    for sort in ("value", "unit_price", "abv", "rating", "name"):                   # and every sort the other way round
+        cases.append({"sort": sort, "member": True, "q": "", "min_retailers": 1, "reverse": True})
+        cases.append({"sort": sort, "member": False, "q": "", "min_retailers": 2, "reverse": True, "min_abv": 4.0})
     return cases
 
 
 def query_of(c):
     return {"q": c["q"], "sort": c["sort"], "min_retailers": c["min_retailers"], "include_member": c["member"],
             "retailers": c.get("retailers"), "types": c.get("types"), "min_units": c.get("min_units"),
-            "max_units": c.get("max_units"), "min_abv": c.get("min_abv"), "max_abv": c.get("max_abv")}
+            "max_units": c.get("max_units"), "min_abv": c.get("min_abv"), "max_abv": c.get("max_abv"),
+            "reverse": c.get("reverse", False)}
 
 
 def digest(products):
@@ -134,7 +138,7 @@ def test_browser_side_filtering_and_sorting_matches_the_server(site):
             r = queries.compare(site["conn"], state, q=query["q"], sort=query["sort"], include_member=query["include_member"],
                                 retailers=query["retailers"], types=query["types"], min_units=query["min_units"],
                                 max_units=query["max_units"], min_abv=query["min_abv"], max_abv=query["max_abv"],
-                                min_retailers=query["min_retailers"], limit=1000)
+                                min_retailers=query["min_retailers"], reverse=query["reverse"], limit=1000)
             expected[name] = (r["meta"]["total"], [p["id"] for p in r["products"]], digest(r["products"]))
 
     cases_file = site["out"].parent / "cases.json"
@@ -146,7 +150,7 @@ def test_browser_side_filtering_and_sorting_matches_the_server(site):
     mismatches = [n for n in expected if got[n] != json.loads(json.dumps(expected[n]))]
     assert not mismatches, mismatches[:5]
     assert any(t for t, *_ in expected.values())          # not vacuous
-    assert len({tuple(ids) for _, ids, _ in expected.values()}) > 25   # the filters and sorting really vary the answers
+    assert len({tuple(ids) for _, ids, _ in expected.values()}) > 35   # the filters and sorting really vary the answers
 
 
 def test_exported_payload_carries_the_facets_the_dropdowns_use(site):
@@ -318,6 +322,20 @@ def test_new_filters_work_in_a_real_browser(site):
             wait_count(f"n < {all_count}")
             labels = page.eval_on_selector_all(".cell:not(.empty)", "els => els.map(e => e.children[2].textContent)")
             assert labels and all("Case of 24" in t for t in labels), labels[:3]
+
+            # reverse order flips the list (and "Clear filters" puts it back)
+            first = page.locator(".card h2").first.inner_text()
+            page.select_option("#sort", "name")
+            page.wait_for_function("document.querySelector('.card h2') && document.querySelector('.card h2').textContent !== " + json.dumps(first))
+            a_to_z = page.locator(".card h2").first.inner_text()
+            page.click("#reverse")
+            assert page.get_attribute("#reverse", "aria-pressed") == "true"
+            page.wait_for_function("document.querySelector('.card h2').textContent !== " + json.dumps(a_to_z))
+            z_to_a = page.locator(".card h2").first.inner_text()
+            assert z_to_a.lower() > a_to_z.lower()
+            page.click("#clear")
+            assert page.get_attribute("#reverse", "aria-pressed") == "false"
+            page.wait_for_function("document.querySelector('.card h2').textContent === " + json.dumps(first))
 
             # ABV is a dropdown now
             page.select_option("#min_units", "")

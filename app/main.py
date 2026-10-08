@@ -88,6 +88,7 @@ def create_app(db_path=None):
         state: str,
         q: str = "",
         sort: str = "value",
+        reverse: bool = False,
         include_member: bool = True,
         retailer: list[str] = Query(default=[]),
         type: list[str] = Query(default=[]),
@@ -107,7 +108,7 @@ def create_app(db_path=None):
         conn = connection()
         try:
             return queries.compare(
-                conn, checked_state(state), q=q, sort=sort,
+                conn, checked_state(state), q=q, sort=sort, reverse=reverse,
                 include_member=include_member, retailers=retailer or None, types=type or None,
                 min_abv=min_abv, max_abv=max_abv, min_retailers=min_retailers,
                 min_units=min_units, max_units=max_units,

@@ -14,6 +14,7 @@ your computer, once a day:
 
 - `scripts/scheduled_scrape.py`: the daily scrape. [docs/SCHEDULED_SCRAPE.md](docs/SCHEDULED_SCRAPE.md)
 - `scripts/export_static.py` + `scripts/publish_pages.sh`: build and publish the site. [docs/FREE_HOSTING.md](docs/FREE_HOSTING.md)
+- Changing wording or looks: edit `app/static/` and push; the site redeploys itself ([docs/EDITING_THE_SITE.md](docs/EDITING_THE_SITE.md)). Never edit the generated `site/` folder.
 - `scripts/import_dm_page.py`: add Dan Murphy's prices from a page you browsed and saved yourself (no automated access). [docs/DAN_MURPHYS_MANUAL.md](docs/DAN_MURPHYS_MANUAL.md)
 - The site's filters: retailer chips (pick several to see only beers every picked retailer sells; none picked = any), type of beer (a checkbox dropdown; best-effort from the product name: `common/beer_types.py`; "Zero" on its own means non-alcoholic), quantity range, ABV range, member offers (on by default), search and sort (best value, lowest price per can/bottle, highest rated, highest ABV, name). Titles hide pack size and volume (shown separately). Cards and the product modal show the average star rating (pooled across retailers by review count) where the retailer publishes one.
 - `scripts/daily_run.sh`: the whole chain (what the scheduler runs). Publishes with `scripts/deploy_cloudflare.sh` (Cloudflare Pages) and/or `scripts/publish_pages.sh` (GitHub Pages).

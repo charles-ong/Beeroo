@@ -356,3 +356,31 @@ def test_a_pack_that_disappears_stops_being_listed(tmp_path):
     ingest.run_matching(conn)
     (p,) = queries.compare(conn, "ACT", limit=5, now=day2)["products"]
     assert [(o["units"], o["price"]) for o in p["retailers"]["bws"]["options"]] == [(1, 5.0)]
+
+
+# ---- reverse order -------------------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("sort", ["value", "unit_price", "abv", "rating", "name"])
+def test_reverse_flips_the_order_and_keeps_products_without_a_value_last(client, sort):
+    get = lambda **kw: client.get("/api/compare", params={"state": "ACT", "limit": 200, "sort": sort, **kw}).json()["products"]
+    forward, backward = get(), get(reverse=True)
+    assert {p["id"] for p in forward} == {p["id"] for p in backward} and forward != backward
+    fields = {"value": "min_price_per_standard_drink", "unit_price": "min_unit_price", "abv": "abv", "rating": "rating"}
+    if sort == "name":
+        assert [p["name"].lower() for p in backward] == sorted((p["name"].lower() for p in backward), reverse=True)
+        return
+    value = (lambda p: queries.rating_score(p) if p["rating"] else None) if sort == "rating" else (lambda p: p[fields[sort]])
+    known = lambda ps: [value(p) for p in ps if value(p) is not None]
+    assert known(forward) == sorted(known(forward), reverse=(sort in ("abv", "rating")))
+    assert known(backward) == sorted(known(backward), reverse=(sort not in ("abv", "rating")))
+    for ps in (forward, backward):                                  # unknowns trail in both directions
+        flags = [value(p) is None for p in ps]
+        assert flags == sorted(flags)
+
+
+def test_reverse_is_off_by_default_and_accepted_as_a_flag(client):
+    a = client.get("/api/compare", params={"state": "ACT", "limit": 5}).json()["products"]
+    b = client.get("/api/compare", params={"state": "ACT", "limit": 5, "reverse": False}).json()["products"]
+    c = client.get("/api/compare", params={"state": "ACT", "limit": 5, "reverse": True}).json()["products"]
+    assert a == b and a != c

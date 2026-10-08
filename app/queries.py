@@ -297,9 +297,34 @@ def _mark_best(product):
         product["min_" + metric] = min((s for s, _ in scored), default=None)
 
 
+# sort name -> (what to sort on, direction by default: 1 = low to high, -1 = high to low)
+_NUMERIC_SORTS = {
+    "value": (lambda p: p["min_price_per_standard_drink"], 1),
+    "unit_price": (lambda p: p["min_unit_price"], 1),
+    "abv": (lambda p: p["abv"], -1),
+    "rating": (lambda p: rating_score(p) if p["rating"] else None, -1),
+}
+
+
+def ordered(products, sort, reverse=False):
+    """Products in the sort's natural order, or the opposite with `reverse`. Products with no value
+    for the sort (no ABV, no rating...) always come last, whichever way round. Mirrored in staticdata.js."""
+    if sort == "name":
+        return sorted(products, key=lambda p: p["name"].lower(), reverse=reverse)
+
+    get, natural = _NUMERIC_SORTS[sort]
+    direction = -natural if reverse else natural
+
+    def key(p):
+        value = get(p)
+        return (value is None, direction * value if value is not None else 0, p["name"])
+
+    return sorted(products, key=key)
+
+
 def compare(conn, state, q="", sort="value", include_member=True, retailers=None,
             min_abv=None, max_abv=None, min_retailers=1, min_units=None, max_units=None,
-            types=None, limit=50, offset=0, now=None):
+            types=None, reverse=False, limit=50, offset=0, now=None):
     if sort not in SORTS:
         raise ValueError(f"sort must be one of {sorted(SORTS)}")
     unknown = set(types or []) - set(TYPES)
@@ -333,17 +358,7 @@ def compare(conn, state, q="", sort="value", include_member=True, retailers=None
                 continue
         result.append(p)
 
-    INF = float("inf")
-    keys = {
-        "value": lambda p: (p["min_price_per_standard_drink"] is None,
-                            p["min_price_per_standard_drink"] or INF, p["name"]),
-        "unit_price": lambda p: (p["min_unit_price"] is None,
-                                 p["min_unit_price"] or INF, p["name"]),
-        "abv": lambda p: (p["abv"] is None, -(p["abv"] or 0), p["name"]),
-        "rating": lambda p: (p["rating"] is None, -(rating_score(p) if p["rating"] else 0), p["name"]),
-        "name": lambda p: p["name"].lower(),
-    }
-    result.sort(key=keys[sort])
+    result = ordered(result, sort, reverse)
 
     total = len(result)
     latest = [loc["latest"] for loc in locations["retailers"].values() if loc]

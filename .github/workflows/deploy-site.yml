@@ -1,0 +1,65 @@
+# Redeploy the website when its files change (a new subtitle, colours, a filter...), without
+# scraping anything: it uses the database already on the `data` branch.
+#
+#   Edit app/static/index.html (text), style.css (look), app.js / staticdata.js (behaviour),
+#   commit and push to main: this workflow rebuilds the site and deploys it to Cloudflare Pages.
+#   You can also start it by hand: Actions -> Deploy site -> Run workflow.
+#
+# It needs the same Cloudflare secrets/variable as the daily job (docs/CLOUD_SCRAPE.md).
+name: Deploy site
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/static/**"
+      - "app/queries.py"
+      - "common/beer_types.py"
+      - "scripts/export_static.py"
+      - ".github/workflows/deploy-site.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# shares a lock with the daily job's publish step so an older build never lands on top of a newer one
+concurrency:
+  group: site-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Get the current database from the data branch
+        env:
+          BEEROO_DATA_REMOTE: https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git
+        run: |
+          mkdir -p data
+          python scripts/data_branch.py restore --clone data-branch --into data
+
+      - name: Build the website
+        run: python scripts/export_static.py --db data/beeroo.sqlite3 --out site
+
+      - name: Deploy to Cloudflare Pages
+        env:
+          BEEROO_CF_PROJECT: ${{ vars.BEEROO_CF_PROJECT }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$BEEROO_CF_PROJECT" ]; then
+            echo "BEEROO_CF_PROJECT is not set (Settings > Secrets and variables > Actions > Variables): site built but not deployed" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          scripts/deploy_cloudflare.sh site

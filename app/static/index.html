@@ -18,7 +18,7 @@
     </svg>
     <div class="hero-text">
       <h1>Beeroo</h1>
-      <p class="tag">Compare beer prices &amp; value per standard drink across Dan Murphy's, BWS and Liquorland.</p>
+      <p class="tag">Compare beers across Dan Murphy's, BWS and Liquorland.</p>
     </div>
     <div class="postcode">
       <label for="state">Your state or territory</label>
@@ -54,7 +54,9 @@
           </div>
         </details>
       </div>
-      <label class="f">Sort by
+      <div class="f">
+        <label for="sort">Sort by</label>
+        <div class="sortrow">
         <select id="sort">
           <option value="value">Best value ($/standard drink)</option>
           <option value="unit_price">Lowest price per can/bottle</option>
@@ -62,7 +64,9 @@
           <option value="abv">Highest ABV</option>
           <option value="name">Name A–Z</option>
         </select>
-      </label>
+        <button id="reverse" type="button" class="toggle" aria-pressed="false" title="Show the list the other way round (products with no value stay last)">⇅ Reverse</button>
+        </div>
+      </div>
     </div>
     <div class="frow">
       <div class="f" role="group" aria-labelledby="retailer-label">

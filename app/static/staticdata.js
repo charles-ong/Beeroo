@@ -22,17 +22,25 @@
   };
   const lt = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
 
-  // Same ordering as queries.compare: unknown values last, then by name.
-  const SORTS = {
-    value: (a, b) => lt(a.min_price_per_standard_drink == null, b.min_price_per_standard_drink == null)
-      || lt(a.min_price_per_standard_drink ?? INF, b.min_price_per_standard_drink ?? INF) || lt(a.name, b.name),
-    unit_price: (a, b) => lt(a.min_unit_price == null, b.min_unit_price == null)
-      || lt(a.min_unit_price ?? INF, b.min_unit_price ?? INF) || lt(a.name, b.name),
-    abv: (a, b) => lt(a.abv == null, b.abv == null) || lt(-(a.abv || 0), -(b.abv || 0)) || lt(a.name, b.name),
-    rating: (a, b) => lt(!a.rating, !b.rating) || lt(-(a.rating ? ratingScore(a) : 0), -(b.rating ? ratingScore(b) : 0))
-      || lt(a.name, b.name),
-    name: (a, b) => lt(a.name.toLowerCase(), b.name.toLowerCase()),
+  // Same ordering as queries.ordered: unknown values last (whichever way round), then by name.
+  // [what to sort on, natural direction: 1 = low to high, -1 = high to low]
+  const NUMERIC_SORTS = {
+    value: [(p) => p.min_price_per_standard_drink, 1],
+    unit_price: [(p) => p.min_unit_price, 1],
+    abv: [(p) => p.abv, -1],
+    rating: [(p) => (p.rating ? ratingScore(p) : null), -1],
   };
+  const SORT_NAMES = [...Object.keys(NUMERIC_SORTS), "name"];
+
+  function comparator(sort, reverse) {
+    if (sort === "name") return (a, b) => (reverse ? -1 : 1) * lt(a.name.toLowerCase(), b.name.toLowerCase());
+    const [get, natural] = NUMERIC_SORTS[sort];
+    const direction = reverse ? -natural : natural;
+    return (a, b) => {
+      const x = get(a), y = get(b);
+      return lt(x == null, y == null) || (x == null ? 0 : lt(direction * x, direction * y)) || lt(a.name, b.name);
+    };
+  }
 
   // First option with the smallest non-null value (Python's min() over the same list).
   function best(options, key) {
@@ -90,13 +98,13 @@
 
   /**
    * @param payload one exported state file {meta, locations, products}
-   * @param q {q, sort, include_member (default true), min_abv, max_abv, min_units, max_units,
+   * @param q {q, sort, reverse, include_member (default true), min_abv, max_abv, min_units, max_units,
    *           min_retailers, retailers: [ids], types: [names], limit, offset}
    * @returns same shape as GET /api/compare
    */
   function applyQuery(payload, q) {
     const sort = q.sort || "value";
-    if (!SORTS[sort]) throw new Error("sort must be one of " + Object.keys(SORTS).sort().join(", "));
+    if (!SORT_NAMES.includes(sort)) throw new Error("sort must be one of " + [...SORT_NAMES].sort().join(", "));
     const tokens = String(q.q || "").toLowerCase().split(/\s+/).filter(Boolean);
     const wanted = q.retailers && q.retailers.length ? new Set(q.retailers) : null;
     const wantedTypes = q.types && q.types.length ? new Set(q.types) : null;
@@ -118,7 +126,7 @@
       }
       return true;
     });
-    result.sort(SORTS[sort]);
+    result.sort(comparator(sort, !!q.reverse));
 
     const limit = q.limit || 50, offset = q.offset || 0;
     return {

@@ -96,7 +96,7 @@ async function api(path, params) {
 }
 function filterParams() {
   return {
-    state: state_.region, q: $("q").value.trim(), sort: $("sort").value,
+    state: state_.region, q: $("q").value.trim(), sort: $("sort").value, reverse: $("reverse").getAttribute("aria-pressed") === "true",
     types: selectedTypes(), retailers: [...state_.retailers],
     min_units: $("min_units").value, max_units: $("max_units").value,
     min_abv: $("min_abv").value, max_abv: $("max_abv").value,
@@ -326,6 +326,11 @@ $("detail-close").addEventListener("click", () => $("detail").close());
 $("detail").addEventListener("click", (e) => { if (e.target === $("detail")) $("detail").close(); });
 let timer;
 $("q").addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(() => search(false), 300); });
+$("reverse").addEventListener("click", () => {
+  const on = $("reverse").getAttribute("aria-pressed") !== "true";
+  $("reverse").setAttribute("aria-pressed", String(on));
+  search(false);
+});
 for (const id of ["sort", "min_units", "max_units", "min_abv", "max_abv", "include_member", "multi"]) {
   $(id).addEventListener("change", () => search(false));
 }
@@ -385,6 +390,7 @@ function buildStaticFilters() {
     document.querySelectorAll("#type-options input").forEach((i) => { i.checked = false; });
     typeSummary();
     $("sort").value = "value";
+    $("reverse").setAttribute("aria-pressed", "false");
     $("include_member").checked = true;
     $("multi").checked = false;
     state_.retailers.clear();

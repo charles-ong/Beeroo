@@ -216,3 +216,35 @@ def test_without_a_data_remote_everything_still_runs_locally(repo):
     run(path)
     text = log.read_text()
     assert "--emit-dir" not in text and "export_static" in text
+
+
+# ---- the deploy-site workflow (text and style changes go live without a scrape) ---------------------------------
+
+
+DEPLOY = ROOT / ".github" / "workflows" / "deploy-site.yml"
+
+
+def test_deploy_site_runs_on_pushes_that_change_the_site_and_by_hand():
+    wf = yaml.safe_load(DEPLOY.read_text())
+    triggers = wf.get("on") or wf.get(True)
+    assert triggers["push"]["branches"] == ["main"] and "app/static/**" in triggers["push"]["paths"]
+    assert "workflow_dispatch" in triggers and wf["permissions"] == {"contents": "read"}
+
+
+def test_deploy_site_never_writes_the_data_branch_or_scrapes():
+    text = DEPLOY.read_text()
+    assert "data_branch.py restore" in text and "data_branch.py save" not in text
+    assert "scheduled_scrape" not in text and "playwright" not in text.lower()
+
+
+def test_deploy_site_and_the_daily_publish_share_a_lock_so_old_builds_never_overwrite_new_ones():
+    deploy = yaml.safe_load(DEPLOY.read_text())
+    daily = yaml.safe_load(WORKFLOW.read_text())
+    assert deploy["concurrency"]["group"] == daily["jobs"]["publish"]["concurrency"]["group"] == "site-deploy"
+    assert deploy["concurrency"]["cancel-in-progress"] is False is daily["jobs"]["publish"]["concurrency"]["cancel-in-progress"]
+
+
+def test_deploy_site_secrets_stay_in_env_blocks():
+    wf = yaml.safe_load(DEPLOY.read_text())
+    for step in wf["jobs"]["deploy"]["steps"]:
+        assert "secrets." not in step.get("run", "") and "${{ inputs" not in step.get("run", "")
