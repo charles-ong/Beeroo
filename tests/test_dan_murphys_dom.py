@@ -302,3 +302,98 @@ def test_but_a_page_where_most_cards_fail_is_still_rejected_as_a_format_change(c
     r = client.post("/api/admin/ingest", headers={"X-Admin-Token": "t" * 32},
                     json={"kind": "dan_murphys_cards", "location": STORE, "payload": {"cards": CARDS["cards"][:10] + broken}})
     assert r.status_code == 422
+
+
+# ---- "Load more": the button appears a moment after the data (a cloud run stopped at 24 of 392) ----------------
+
+from playwright.async_api import TimeoutError as PWTimeout  # noqa: E402
+
+
+class LateButton:
+    """The site's "Load more": takes `appears_after` ms to be drawn after the data arrives (Playwright's wait_for
+    polls up to its timeout); clicking it adds a page of products. It's gone once everything is loaded."""
+
+    def __init__(self, page, appears_after=0):
+        self.page, self.first, self.waits, self.appears_after = page, self, 0, appears_after
+
+    async def wait_for(self, state="visible", timeout=0):
+        self.waits += 1
+        if self.page.done() or self.appears_after > timeout:
+            raise PWTimeout("not drawn in time")
+
+    async def scroll_into_view_if_needed(self):
+        pass
+
+    async def click(self, timeout=0):
+        if self.page.fail_clicks:
+            self.page.fail_clicks -= 1
+            raise PWTimeout("covered")
+        self.page.collector.add_page()
+
+
+class SiteCollector:
+    def __init__(self, total, per_page=24):
+        self.pages, self.total, self.per_page = {}, total, per_page
+        self.add_page()
+
+    def add_page(self):
+        n = len(self.pages) + 1
+        self.pages[n] = {"Bundles": [{"Products": [{}] * min(self.per_page, self.total - len(self.pages) * self.per_page)}]}
+
+    async def wait_for_new_page(self, timeout_s=20):
+        pass
+
+
+class SitePage:
+    def __init__(self, total, appears_after=0, fail_clicks=0):
+        self.collector, self.fail_clicks = SiteCollector(total), fail_clicks
+        self.button = LateButton(self, appears_after)
+
+    def done(self):
+        return sum(len(b["Products"]) for p in self.collector.pages.values() for b in p["Bundles"]) >= self.collector.total
+
+    def locator(self, selector):
+        assert selector == dan_murphys.LOAD_MORE
+        return self.button
+
+
+def loaded(page):
+    return sum(len(b["Products"]) for p in page.collector.pages.values() for b in p["Bundles"])
+
+
+@pytest.fixture()
+def fast(monkeypatch):
+    monkeypatch.setattr(dan_murphys, "PAUSE_RANGE_S", (0, 0))
+
+
+def test_a_button_that_is_drawn_late_is_waited_for_not_given_up_on(fast):
+    page = SitePage(total=96, appears_after=4000)          # drawn 4 s after the data: a check at once would miss it
+    run(dan_murphys.load_all_pages(page, page.collector))
+    assert loaded(page) == 96 and len(page.collector.pages) == 4
+
+
+def test_a_button_that_never_comes_ends_the_list_and_says_so(fast, caplog):
+    page = SitePage(total=96, appears_after=60_000)
+    with caplog.at_level("WARNING", logger="beeroo.scrape"):
+        run(dan_murphys.load_all_pages(page, page.collector))
+    assert loaded(page) == 24
+    assert "no 'Load more' button" in caplog.text and "24 of 96" in caplog.text
+
+
+def test_a_click_that_is_blocked_once_is_retried(fast):
+    page = SitePage(total=48, fail_clicks=1)
+    run(dan_murphys.load_all_pages(page, page.collector))
+    assert loaded(page) == 48
+
+
+def test_a_button_that_cannot_be_clicked_gives_up_with_a_message(fast, caplog):
+    page = SitePage(total=48, fail_clicks=5)
+    with caplog.at_level("WARNING", logger="beeroo.scrape"):
+        run(dan_murphys.load_all_pages(page, page.collector))
+    assert loaded(page) == 24 and "could not click" in caplog.text
+
+
+def test_nothing_is_clicked_when_everything_is_already_loaded(fast):
+    page = SitePage(total=20)
+    run(dan_murphys.load_all_pages(page, page.collector))
+    assert page.button.waits == 0 and loaded(page) == 20

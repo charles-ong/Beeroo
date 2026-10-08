@@ -8,6 +8,7 @@ through the site's own store selector.
 """
 import asyncio
 import json
+import logging
 import os
 import random
 import re
@@ -28,9 +29,14 @@ CATEGORY_URL = f"{BASE_URL}/beer/all"
 BROWSE_PATH = "/apis/ui/Browse"
 CATEGORY = "beer"
 
+LOAD_MORE = ".infinite-loader__load-more-button"
+BUTTON_WAIT_MS = 10000      # the button renders a moment after the page's data arrives
 PAUSE_RANGE_S = (2.0, 4.0)
 MAX_PAGES = 40
 
+
+
+log = logging.getLogger("beeroo.scrape")
 
 
 class Blocked(RuntimeError):
@@ -173,6 +179,31 @@ async def select_location(page, collector, postcode):
     return location
 
 
+async def load_more_button(page, wait_ms=BUTTON_WAIT_MS):
+    """The "Load more" button once it has rendered, or None if it doesn't show up
+    (the list is complete). Checking at once, before the page has drawn it, is what
+    cut a cloud run short after the first 24 of 392 products."""
+    button = page.locator(LOAD_MORE).first
+    try:
+        await button.wait_for(state="visible", timeout=wait_ms)
+    except PlaywrightTimeoutError:
+        return None
+    return button
+
+
+async def click_load_more(button):
+    for attempt in (1, 2):
+        try:
+            await button.scroll_into_view_if_needed()
+            await button.click(timeout=10000)
+            return True
+        except PlaywrightTimeoutError:
+            if attempt == 2:
+                return False
+            await asyncio.sleep(1)
+    return False
+
+
 async def load_all_pages(page, collector, max_pages=MAX_PAGES):
     while len(collector.pages) < max_pages:
         loaded = sum(
@@ -184,17 +215,23 @@ async def load_all_pages(page, collector, max_pages=MAX_PAGES):
         if collector.total is not None and loaded >= collector.total:
             break
 
-        button = page.locator(".infinite-loader__load-more-button")
+        button = await load_more_button(page)
 
-        if await button.count() == 0 or not await button.is_visible():
+        if button is None:
+            log.warning("no 'Load more' button after %d s with %d of %s products loaded",
+                        BUTTON_WAIT_MS // 1000, loaded, collector.total)
             break
 
         await asyncio.sleep(random.uniform(*PAUSE_RANGE_S))
-        await button.click()
+
+        if not await click_load_more(button):
+            log.warning("could not click 'Load more' with %d of %s products loaded", loaded, collector.total)
+            break
 
         try:
             await collector.wait_for_new_page()
         except asyncio.TimeoutError:
+            log.warning("'Load more' clicked but no new page of products arrived (%d of %s loaded)", loaded, collector.total)
             break
 
 
@@ -220,7 +257,10 @@ async def read_cards(page):
 async def load_all_cards(page, max_clicks=100):
     """Click "Load more" like a user until the card count stops growing."""
     cards = page.locator("shop-product-card")
-    button = page.locator(".infinite-loader__load-more-button")
+    try:
+        await cards.first.wait_for(state="attached", timeout=15000)
+    except PlaywrightTimeoutError:
+        return
     previous = 0
 
     for _ in range(max_clicks):
@@ -232,16 +272,14 @@ async def load_all_cards(page, max_clicks=100):
                 break
         previous = current
 
-        if not await button.count() or not await button.is_visible():
+        button = await load_more_button(page)
+        if button is None:
             break
 
         await asyncio.sleep(random.uniform(*PAUSE_RANGE_S))
-        try:
-            await button.scroll_into_view_if_needed()
-            await button.click()
-            await page.wait_for_timeout(1500)
-        except Exception:  # noqa: BLE001 - the button can vanish at the end of the list
+        if not await click_load_more(button):
             break
+        await page.wait_for_timeout(1500)
 
 
 def collect_products(collector, location_key, observed_at=None):
