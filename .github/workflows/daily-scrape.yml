@@ -159,6 +159,7 @@ jobs:
             data/result.json
             data/scrape.log
             data/*.png
+            data/failed/*.json
           if-no-files-found: ignore
           retention-days: 7
 

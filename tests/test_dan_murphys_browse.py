@@ -121,3 +121,39 @@ def test_location_from_preferences():
     assert loc.location_key == "dan_murphys:1546"
     assert (loc.suburb, loc.state, loc.postcode) == ("Thornleigh", "NSW", "2120")
     assert location_from_preferences({}) is None
+
+
+# ---- a few odd products on a page of 24 must not read as "the format changed" ------------------------------------------
+
+
+def _page_with_odd_products(odd):
+    import copy
+    page = copy.deepcopy(json.loads(FIXTURE.read_text()))
+    products = [p for b in page["Bundles"] for p in b["Products"]]
+    for product in products[:odd]:
+        product["Prices"]["caseprice"]["Message"] = "per slab of fun"
+        product["Prices"].pop("singleprice", None)
+        product["Prices"].pop("promoprice", None)
+    return page, len(products)
+
+
+def test_three_odd_products_among_24_still_ingest():
+    from app import ingest
+    from common import db
+    page, n = _page_with_odd_products(3)
+    body = ingest.IngestIn.model_validate({"kind": "dan_murphys_browse", "payload": page, "location": {
+        "store_id": "1856", "store_name": "Frenchs Forest", "suburb": "Frenchs Forest", "state": "NSW", "postcode": "2086"}})
+    result = ingest.ingest_trusted(db.connect(), body)
+    assert n == 24 and result["products"] == 21 and result["skipped"] == 3
+
+
+def test_a_page_where_most_products_fail_is_still_rejected_with_the_reason():
+    from app import ingest
+    from common import db
+    page, _ = _page_with_odd_products(20)
+    body = ingest.IngestIn.model_validate({"kind": "dan_murphys_browse", "payload": page, "location": {
+        "store_id": "1856", "state": "NSW", "postcode": "2086"}})
+    with pytest.raises(ingest.IngestError) as e:
+        ingest.ingest_trusted(db.connect(), body)
+    assert "format may have changed" in e.value.message
+    assert "20 of 24 items unreadable" in e.value.message and "unrecognised price message" in e.value.message

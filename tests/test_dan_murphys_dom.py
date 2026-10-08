@@ -261,6 +261,7 @@ def test_a_seen_json_page_wins_in_auto_mode(stubbed, monkeypatch):
     raw = []
     result = run(dan_murphys.scrape(FakePage(CARDS["cards"]), "2120", raw_pages=raw))
     assert len(result) == 4 and len(result[1]) == 24            # JSON path: no "kind" override
+    assert raw[0].pop("ratings")                                # plus what the page's stars/counts say
     assert raw == [browse] and "pages" in stubbed and "cards" not in stubbed
 
 
@@ -397,3 +398,83 @@ def test_nothing_is_clicked_when_everything_is_already_loaded(fast):
     page = SitePage(total=20)
     run(dan_murphys.load_all_pages(page, page.collector))
     assert page.button.waits == 0 and loaded(page) == 20
+
+
+# ---- ratings: the Browse JSON says 0 reviews for everything; the page shows the real ones ------------------------------
+
+
+def rated_cards():
+    cards = json.loads(json.dumps(CARDS["cards"]))
+    for c, rating in zip(cards, (4.54, 3.0, 5.0)):
+        c["rating"] = rating
+    return cards
+
+
+def test_ratings_come_from_the_cards_by_sku():
+    ratings = dom.ratings_from_cards(rated_cards())
+    assert ratings["587292"] == [4.54, 116]
+    assert len(ratings) > 20 and all(len(v) == 2 for v in ratings.values())
+    assert dom.ratings_from_cards([{"href": "/beer/all", "lines": ["(5 REVIEWS)"]}, "junk", None]) == {}
+
+
+def test_the_pages_ratings_replace_the_jsons_zeros():
+    browse = json.loads((F / "dan_murphys_browse_page1.json").read_text())
+    sku = str(browse["Bundles"][0]["Products"][0]["Stockcode"])
+    page = {**browse, "ratings": {sku: [4.2, 37], "999": [1, 1]}}
+    products, errors = parse_browse(page)
+    first = next(p for p in products if p.listing.retailer_sku == sku)
+    assert (first.listing.rating, first.listing.review_count) == (4.2, 37)
+    assert all(p.listing.rating is None for p in products if p is not first)
+
+
+def test_json_ratings_are_kept_if_the_page_has_none_and_junk_is_ignored():
+    browse = json.loads((F / "dan_murphys_browse_page1.json").read_text())
+    product = browse["Bundles"][0]["Products"][0]
+    product["OverallRating"], product["NumberOfReviews"] = 4.4, 12
+    for junk in ({"ratings": "x"}, {"ratings": {str(product["Stockcode"]): "bad"}}, {"ratings": {str(product["Stockcode"]): [0, 0]}}):
+        products, _ = parse_browse({**browse, **junk})
+        assert next(p for p in products if p.listing.retailer_sku == str(product["Stockcode"])).listing.rating == 4.4
+
+
+def parse_browse(page):
+    from scrapers import endeavour
+    return endeavour.parse_browse_payload(page, K)
+
+
+def test_the_json_path_reads_stars_from_the_page_and_sends_them_with_the_pages(stubbed, monkeypatch):
+    browse = json.loads((F / "dan_murphys_browse_page1.json").read_text())
+    sku = str(browse["Bundles"][0]["Products"][0]["Stockcode"])
+    cards = [{"href": f"/product/DM_{sku}/x", "rating": 4.1, "lines": ["(52 REVIEWS)", "Foo", "Bar 330mL", "$20 pack (6)"]}]
+    original = dan_murphys.BrowseCollector
+
+    class Seen(original):
+        def __init__(self):
+            super().__init__()
+            self.pages, self.total = {1: browse}, 24
+
+    monkeypatch.setattr(dan_murphys, "BrowseCollector", Seen)
+    raw = []
+    _, products, _, _ = run(dan_murphys.scrape(FakePage(cards), "2120", raw_pages=raw))
+    first = next(p for p in products if p.listing.retailer_sku == sku)
+    assert (first.listing.rating, first.listing.review_count) == (4.1, 52)
+    assert raw[0]["ratings"] == {sku: [4.1, 52]}
+
+
+def test_a_failure_reading_the_stars_never_costs_the_prices(stubbed, monkeypatch, caplog):
+    browse = json.loads((F / "dan_murphys_browse_page1.json").read_text())
+    original = dan_murphys.BrowseCollector
+
+    class Seen(original):
+        def __init__(self):
+            super().__init__()
+            self.pages, self.total = {1: browse}, 24
+
+    class Broken(FakePage):
+        async def evaluate(self, js):
+            raise RuntimeError("page closed")
+
+    monkeypatch.setattr(dan_murphys, "BrowseCollector", Seen)
+    raw = []
+    with caplog.at_level("WARNING", logger="beeroo.scrape"):
+        _, products, _, _ = run(dan_murphys.scrape(Broken([]), "2120", raw_pages=raw))
+    assert len(products) == 24 and "ratings" not in raw[0] and "star ratings" in caplog.text

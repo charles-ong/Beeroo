@@ -282,14 +282,13 @@ async def load_all_cards(page, max_clicks=100):
         await page.wait_for_timeout(1500)
 
 
-def collect_products(collector, location_key, observed_at=None):
+def collect_products(collector, location_key, observed_at=None, ratings=None):
     observed_at = observed_at or utcnow()
     by_sku, errors = {}, []
 
     for number in sorted(collector.pages):
-        products, errs = parse_browse_payload(
-            collector.pages[number], location_key, observed_at
-        )
+        page = {**collector.pages[number], "ratings": ratings} if ratings else collector.pages[number]
+        products, errs = parse_browse_payload(page, location_key, observed_at)
         errors.extend(errs)
 
         for product in products:
@@ -338,9 +337,18 @@ async def scrape(page, postcode, max_pages=MAX_PAGES, raw_pages=None):
                 {"kind": "dan_murphys_cards"})
 
     await load_all_pages(page, collector, max_pages)
-    products, errors = collect_products(collector, location.location_key)
+
+    # The Browse JSON says every product has 0 reviews; the stars on the page are the real ones.
+    try:
+        ratings = dan_murphys_dom.ratings_from_cards(await read_cards(page))
+    except Exception:  # noqa: BLE001 - ratings are a bonus; never lose prices over them
+        log.warning("could not read the star ratings from the page", exc_info=True)
+        ratings = {}
+
+    products, errors = collect_products(collector, location.location_key, ratings=ratings)
 
     if raw_pages is not None:
-        raw_pages.extend(collector.pages[n] for n in sorted(collector.pages))
+        raw_pages.extend({**collector.pages[n], "ratings": ratings} if ratings else collector.pages[n]
+                         for n in sorted(collector.pages))
 
     return location, products, errors, collector.total

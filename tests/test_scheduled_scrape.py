@@ -86,6 +86,11 @@ def robots(name, calls):
     return scrape
 
 
+@pytest.fixture(autouse=True)
+def keep_rejected_pages_out_of_the_real_data_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(ss, "FAILED_DIR", tmp_path / "failed")
+
+
 @pytest.fixture()
 def state(tmp_path):
     return str(tmp_path / "state.json")
@@ -553,3 +558,34 @@ def test_a_scrape_result_can_override_the_ingest_kind(state):
     assert results[0]["status"] == "ok" and [b["kind"] for b in pushed] == ["dan_murphys_cards"]
     _, _, normal = go(state, {"dan_murphys": base}, zone="VIC")
     assert [b["kind"] for b in normal] == ["dan_murphys_browse"]
+
+
+# ---- one rejected page must not cost the others ---------------------------------------------
+
+
+def test_a_rejected_page_is_kept_and_the_other_pages_still_count(state, tmp_path):
+    sent = []
+
+    def flaky(body):
+        sent.append(body)
+        if len(sent) == 2:
+            raise RuntimeError("parse: too many unrecognised items (format may have changed): 3 of 24 items unreadable")
+        return {"products": 24, "new_observations": 58, "new_listings": 24}
+    code, results, _ = go(state, {"dan_murphys": fake("dan_murphys", pages=3, total=72)}, push=flaky, zone="NSW")
+    [r] = results
+    assert len(sent) == 3                                              # the third page was still sent
+    assert r["status"] == "partial" and r["pages_not_stored"] == 1 and "unrecognised" in r["error"]
+    assert r["products"] == 48 and code == 0
+    kept = list((tmp_path / "failed").glob("*.json"))
+    assert [k.name for k in kept] == ["dan_murphys-NSW-page02.json"]
+    assert json.loads(kept[0].read_text())["kind"] == "dan_murphys_browse"
+    st = ss.load_state(state)["retailers"]["dan_murphys"]["zones"]["NSW"]
+    assert "last_success" not in st and "1 of 3 pages not stored" in st["last_error"]
+
+
+def test_when_every_page_is_rejected_it_is_a_push_failure(state, tmp_path):
+    def reject(body):
+        raise RuntimeError("parse: nope")
+    _, results, _ = go(state, {"dan_murphys": fake("dan_murphys", pages=2)}, push=reject, zone="NSW")
+    assert results[0]["status"] == "push_failed" and results[0]["error"] == "parse: nope"
+    assert len(list((tmp_path / "failed").glob("*.json"))) == 2

@@ -87,7 +87,30 @@ def drift_share(errors, total=None):
 
 
 def page_size(kind, payload):
-    return len(payload.get("cards") or []) if kind == "dan_murphys_cards" and isinstance(payload.get("cards"), list) else None
+    """How many items a page holds (None if it can't be told), so a handful of odd
+    items on a page of 24 doesn't read as "the format changed"."""
+    try:
+        if kind == "dan_murphys_cards":
+            return len(payload["cards"])
+        if kind == "dan_murphys_browse":
+            return sum(len(b.get("Products") or []) for b in payload.get("Bundles") or [])
+        if kind == "bws_products":
+            return len(payload.get("Items") or [])
+        if kind == "liquorland_products":
+            return len(payload.get("products") or [])
+    except (KeyError, TypeError, AttributeError):
+        pass
+    return None
+
+
+def drift_summary(errors, total):
+    """Why a page was rejected: the counts and the most common reasons (no item data)."""
+    bad = [reason for _, reason in errors if reason not in BENIGN_ERRORS]
+    common = {}
+    for reason in bad:
+        common[reason] = common.get(reason, 0) + 1
+    top = "; ".join(f"{n}x {reason[:80]}" for reason, n in sorted(common.items(), key=lambda kv: -kv[1])[:3])
+    return f"{len(bad)} of {total or len(errors)} items unreadable: {top}"
 
 
 class IngestIn(BaseModel):
@@ -115,8 +138,10 @@ def ingest_trusted(conn, body, now=None):
     except Exception:
         raise IngestError(422, "parse: payload is not in the expected format")
 
-    if drift_share(errors, page_size(body.kind, body.payload)) > DRIFT_ERROR_SHARE:
-        raise IngestError(422, "parse: too many unrecognised items (format may have changed)")
+    size = page_size(body.kind, body.payload)
+    if drift_share(errors, size) > DRIFT_ERROR_SHARE:
+        raise IngestError(422, "parse: too many unrecognised items (format may have changed): "
+                               + drift_summary(errors, size))
     if not products:
         raise IngestError(422, "parse: no usable products in payload")
 

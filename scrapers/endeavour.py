@@ -127,9 +127,22 @@ def parse_prices(product, location_key, observed_at):
     return observations
 
 
+def _page_ratings(payload):
+    """{sku: (rating, count)} the scraper read off the page's own star icons and added to a Browse page
+    ("ratings": {sku: [rating, count]}), because the JSON itself reports 0 reviews for everything."""
+    raw, out = payload.get("ratings"), {}
+    if isinstance(raw, dict):
+        for sku, pair in raw.items():
+            try:
+                out[str(sku)] = clean_rating(pair[0], pair[1])
+            except (TypeError, IndexError, KeyError):
+                continue
+    return out
+
+
 def parse_product(
     product, location_key, observed_at, retailer=Retailer.DAN_MURPHYS,
-    base_url=DM_BASE_URL,
+    base_url=DM_BASE_URL, ratings=None,
 ):
     details = _details(product)
     sku = str(product["Stockcode"])
@@ -142,6 +155,8 @@ def parse_product(
     )
 
     rating, review_count = clean_rating(product.get("OverallRating"), product.get("NumberOfReviews"))
+    if rating is None and sku in (ratings or {}):
+        rating, review_count = ratings[sku]                 # what the page shows beats the JSON's zeros
 
     listing = Listing(
         retailer=retailer,
@@ -169,12 +184,13 @@ def parse_browse_payload(
     """Parse one Browse response. Returns (products, errors)."""
     observed_at = observed_at or utcnow()
     products, errors = [], []
+    ratings = _page_ratings(payload)
 
     for bundle in payload.get("Bundles") or []:
         for raw in bundle.get("Products") or []:
             try:
                 parsed = parse_product(
-                    raw, location_key, observed_at, retailer, base_url
+                    raw, location_key, observed_at, retailer, base_url, ratings
                 )
             except (ValueError, KeyError) as e:
                 errors.append((raw.get("Stockcode"), str(e)))

@@ -47,6 +47,7 @@ ZONES = list(STATES)                       # state codes; postcode = STATES[code
 RETAILERS = ("bws", "liquorland", "dan_murphys")   # interleave order (the reliable ones first)
 KINDS = {"bws": "bws_products", "liquorland": "liquorland_products", "dan_murphys": "dan_murphys_browse"}
 MIN_COMPLETE = 0.8       # share of the site's reported total we must account for
+FAILED_DIR = ROOT / "data" / "failed"
 MAX_CONSECUTIVE_FAILURES = 3   # errors in a row before a retailer is dropped for the day
 MIN_SPACING_S = 180      # minimum average gap between sessions on the SAME site
 MAX_BACKOFF_DAYS = 14
@@ -164,6 +165,17 @@ def local_push(db_path):
     return push
 
 
+def keep_failed_page(name, zone, number, body):
+    """Keep a page the server rejected, so the cause can be found offline instead of
+    by visiting the site again (the CI artifact includes data/failed/)."""
+    try:
+        folder = FAILED_DIR
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{name}-{zone}-page{number:02d}.json").write_text(json.dumps(body))
+    except OSError:
+        log.warning("could not keep the rejected page", exc_info=True)
+
+
 def emit_push(out_dir):
     """Instead of ingesting, write each page's ingest body to `out_dir` as JSON.
     Used for sites scraped on a home machine whose data is ingested elsewhere
@@ -240,31 +252,43 @@ def scrape_one(*, name, zone, scrape, push, rstate, now, max_pages):
     complete = bool(total) and covered >= MIN_COMPLETE * total
 
     pushed = {"products": 0, "new_observations": 0, "new_listings": 0}
-    try:
-        for page in raw_pages:
-            r = push({
-                "kind": result.get("kind") or KINDS[name],
-                # Liquorland prices are per state and its location comes from the payload itself
-                "location": None if name == "liquorland" else location_dict(location),
-                "payload": page,
-                "observed_at": now.isoformat(),
-            })
-            for k in pushed:
-                pushed[k] += r.get(k, 0)
-    except Exception as e:  # noqa: BLE001
-        entry["last_error"] = f"push failed: {e}"
-        log.exception("%s push failed (store %s, %s %s, %s)", name, location.location_key,
-                      location.suburb, location.postcode, location.state)
+    failed = []                  # (page number, why): one rejected page must not cost the others their day
+    for number, page in enumerate(raw_pages, 1):
+        body = {
+            "kind": result.get("kind") or KINDS[name],
+            # Liquorland prices are per state and its location comes from the payload itself
+            "location": None if name == "liquorland" else location_dict(location),
+            "payload": page,
+            "observed_at": now.isoformat(),
+        }
+        try:
+            r = push(body)
+        except Exception as e:  # noqa: BLE001
+            failed.append((number, str(e)))
+            log.error("%s page %d of %d was not stored (store %s, %s %s, %s): %s", name, number, len(raw_pages),
+                      location.location_key, location.suburb, location.postcode, location.state, e)
+            keep_failed_page(name, zone, number, body)
+            continue
+        for k in pushed:
+            pushed[k] += r.get(k, 0)
+
+    if failed and len(failed) == len(raw_pages):
+        entry["last_error"] = f"push failed: {failed[0][1]}"
         return {**base, "status": "push_failed", "store": location.location_key,
-                "store_postcode": location.postcode, "store_state": location.state, "error": str(e)}
+                "store_postcode": location.postcode, "store_state": location.state, "error": failed[0][1]}
+    partial_error = None
+    if failed:
+        complete = False
+        partial_error = f"{len(failed)} of {len(raw_pages)} pages not stored: {failed[0][1]}"
 
     rstate["blocked"] = {"consecutive": 0, "backoff_until": None}
     entry.update(
-        last_error=None, store=location.location_key, products=got, expected=total,
+        last_error=partial_error, store=location.location_key, products=got, expected=total,
         complete=complete, **({"last_success": now.isoformat()} if complete else {}),
     )
     summary = {**base, "status": "ok" if complete else "partial", "store": location.location_key,
-               "collected": got, "expected": total, **pushed}
+               "collected": got, "expected": total, **pushed,
+               **({"pages_not_stored": len(failed), "error": failed[0][1]} if failed else {})}
     (log.info if complete else log.warning)("%s finished: %s", name, summary)
     return summary
 

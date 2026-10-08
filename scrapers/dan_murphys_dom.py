@@ -136,6 +136,27 @@ def parse_prices(lines, name, location_key, observed_at):
     return observations
 
 
+def card_rating(card, lines=None):
+    """(rating, review_count) shown on a card: stars from the card's `rating`, the count from "(116 REVIEWS)"."""
+    lines = _clean_lines(card.get("lines") or []) if lines is None else lines
+    reviews = _REVIEWS.search(" ".join(lines))
+    return clean_rating(card.get("rating"), int(reviews.group(1).replace(",", "")) if reviews else None)
+
+
+def ratings_from_cards(cards):
+    """{sku: [rating, review_count]} from the cards on the page. Dan Murphy's Browse JSON
+    reports 0 reviews for everything; the page itself shows the real stars and count."""
+    out = {}
+    for card in cards or []:
+        link = _PRODUCT_HREF.search(str(card.get("href") or "")) if isinstance(card, dict) else None
+        if not link:
+            continue
+        rating, count = card_rating(card)
+        if rating is not None or count is not None:
+            out.setdefault(link.group(1), [rating, count])
+    return out
+
+
 def parse_card(card, location_key, observed_at=None):
     """One {"href": ..., "lines": [...]} card -> ScrapedProduct. Raises ValueError."""
     observed_at = observed_at or utcnow()
@@ -153,9 +174,7 @@ def parse_card(card, location_key, observed_at=None):
     if not prices:
         raise ValueError("no online prices")
 
-    reviews = _REVIEWS.search(" ".join(lines))
-    rating, review_count = clean_rating(
-        card.get("rating"), int(reviews.group(1).replace(",", "")) if reviews else None)
+    rating, review_count = card_rating(card, lines)
 
     listing = Listing(
         retailer=Retailer.DAN_MURPHYS,
