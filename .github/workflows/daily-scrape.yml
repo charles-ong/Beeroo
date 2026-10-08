@@ -7,15 +7,18 @@
 #   (run page -> "Re-run failed jobs": it re-runs that scrape plus publish).
 # * Scrape jobs never touch the database. They hand their pages and back-off state to
 #   `publish`, the only job that writes the `data` branch, so nothing can clash.
-# * Dan Murphy's blocks cloud servers: your Mac scrapes it and pushes pages to the
-#   branch inbox (scripts/daily_run.sh); `publish` ingests them. docs/CLOUD_SCRAPE.md.
+# * Dan Murphy's is scraped here too, all 7 states that have stores (not the NT), one visit
+#   per state spaced about 10 minutes apart. It let two visits through in a row from a runner
+#   (NSW then ACT) once "Load more" was handled properly, but it blocked cloud servers before:
+#   a block backs it off for days and your hand import (docs/DAN_MURPHYS_MANUAL.md) is the fallback.
+#   Pages your Mac or a hand import leave in the `data` branch inbox are still ingested.
 #
-# Schedule (UTC): 19:00 = BWS (all 8 states) + 1 Liquorland state; 01:00, 07:00, 13:00 =
-# 1 Liquorland state each. Liquorland's bot protection tolerates only a couple of visits
+# Schedule (UTC): 19:00 = BWS (all 8 states) + Dan Murphy's (7 states) + 1 Liquorland state;
+# 01:00, 07:00, 13:00 = 1 Liquorland state each. Liquorland's bot protection tolerates only a couple of visits
 # a day from GitHub's addresses, so it gets one slow session per run, oldest state first
 # (about 5 per day, all 8 states in under two days). Edit the cron lines to change that.
 # Liquorland's robots.txt disallows the /api/ path its pages load data from
-# (docs/SCHEDULED_SCRAPE.md); delete its entry from the plan step to leave it out.
+# (docs/SCHEDULED_SCRAPE.md); delete a retailer's line from the plan step to leave it out.
 # Free-minute allowances and policies change; check GitHub's current terms.
 name: Daily cloud scrape
 
@@ -30,10 +33,10 @@ on:
       retailers:
         description: Which retailers to scrape
         type: choice
-        default: both
-        options: [both, bws, liquorland]
+        default: all
+        options: [all, bws, dan_murphys, liquorland]
       zones_per_run:
-        description: States per retailer (1-8). Blank = BWS 8, Liquorland 1
+        description: States per retailer (1-8). Blank = BWS 8, Dan Murphy's 7 (every state with stores), Liquorland 1
         type: string
         default: ""
       clear_backoff:
@@ -64,20 +67,19 @@ jobs:
         run: |
           set -eu
           case "$ZONES" in ""|[1-8]) ;; *) echo "zones_per_run must be 1-8" >&2; exit 1 ;; esac
-          bws=false; ll=false
+          bws=false; dm=false; ll=false
           if [ -n "$RETAILERS" ]; then            # started by hand
-            case "$RETAILERS" in both) bws=true; ll=true ;; bws) bws=true ;; liquorland) ll=true ;; esac
+            case "$RETAILERS" in all) bws=true; dm=true; ll=true ;; bws) bws=true ;; dan_murphys) dm=true ;; liquorland) ll=true ;; esac
           elif [ "$SCHEDULE" = "0 19 * * *" ]; then
-            bws=true; ll=true
+            bws=true; dm=true; ll=true
           else
             ll=true
           fi
           items=""
-          [ "$bws" = true ] && items="{\"retailer\":\"bws\",\"zones\":\"${ZONES:-8}\"}"
-          if [ "$ll" = true ]; then
-            [ -n "$items" ] && items="$items,"
-            items="$items{\"retailer\":\"liquorland\",\"zones\":\"${ZONES:-1}\"}"
-          fi
+          add() { [ -n "$items" ] && items="$items,"; items="$items{\"retailer\":\"$1\",\"zones\":\"$2\"}"; }
+          [ "$bws" = true ] && add bws "${ZONES:-8}"
+          [ "$dm" = true ] && add dan_murphys "${ZONES:-7}"
+          [ "$ll" = true ] && add liquorland "${ZONES:-1}"
           echo "matrix={\"include\":[$items]}" >> "$GITHUB_OUTPUT"
           echo "Planned: $items"
 

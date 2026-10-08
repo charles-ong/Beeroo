@@ -1,29 +1,34 @@
-# Daily scraping in the cloud (BWS + Liquorland) with your Mac doing Dan Murphy's
+# Daily scraping in the cloud (BWS, Dan Murphy's and Liquorland)
 
 ```
- GitHub Actions (free runners)                                    your Mac, daily 03:00 (launchd)
-   plan ─► scrape (bws, 8 states) ───────┐                          scrape Dan Murphy's only (visible browser)
-           scrape (liquorland, 1 state) ─┤ pages + back-off state   push pages to `data` branch inbox/
-                                         ▼                                  │
-   publish: restore DB from `data` branch ◄─────────────────────────────────┘
-            ingest Dan Murphy's pages + this run's pages
+ GitHub Actions (free runners)
+   plan ─► scrape (bws, 8 states) ──────────────┐
+           scrape (dan_murphys, 7 states) ──────┤ pages + back-off state
+           scrape (liquorland, 1 state) ────────┤
+                                                ▼
+   publish: restore DB from `data` branch
+            ingest this run's pages (+ any pages left in the branch inbox by a hand import)
             save DB to `data` branch ─► export site ─► deploy to Cloudflare Pages
 ```
 
 Each retailer is its own job. They never touch the database; they hand their pages to `publish`, the only
 job that writes the `data` branch. So a failed or blocked retailer can be re-run on its own.
 
-**Schedule (UTC)** in `.github/workflows/daily-scrape.yml`: 19:00 = BWS (all 8 states) + 1 Liquorland state;
-01:00, 07:00 and 13:00 = 1 Liquorland state each. Liquorland's bot protection only tolerates a couple of visits
-a day from GitHub's addresses, so it gets one slow session per run, oldest state first: about 5 states a day,
-all 8 in under two days. If it still gets blocked, it backs off 2, 4, 8... days (we never try to get past it);
-the other option is to scrape Liquorland on your Mac too: put `BEEROO_LOCAL_RETAILER=all` and
-`BEEROO_SKIP_RETAILERS=bws` in `~/.config/beeroo/env`, and remove Liquorland from the `plan` step of the workflow
-(its pages then travel through the same inbox as Dan Murphy's).
+**Schedule (UTC)** in `.github/workflows/daily-scrape.yml`: 19:00 = BWS (all 8 states) + Dan Murphy's (the 7 states
+with stores: it has none in the NT) + 1 Liquorland state; 01:00, 07:00 and 13:00 = 1 Liquorland state each.
 
-Dan Murphy's blocks cloud servers (and headless browsers), so only your Mac scrapes it. Everything else
-runs without your Mac. If your Mac is off, the site simply keeps yesterday's Dan Murphy's prices and the
-freshness report says so. Cost: $0 (check GitHub's and Cloudflare's current free allowances).
+- **Dan Murphy's** is visited once per state, about 10 minutes apart. From a GitHub runner it let NSW and then ACT
+  through once "Load more" was handled properly; it blocked cloud servers earlier, so it may again. A block backs it off
+  2, 4, 8... days and never retries the same day. **Its prices and range differ by state** (about 1 product in 9 differs between NSW and ACT), so every
+  state is scraped, never copied from another. When it is backing off, use the hand import
+  (`docs/DAN_MURPHYS_MANUAL.md`), and make sure the site really shows that state's store first.
+- **Liquorland**'s bot protection only tolerates a couple of visits a day from GitHub's addresses, so it gets one slow
+  session per run, oldest state first: about 5 states a day, all 8 in under two days. If it still gets blocked, it backs
+  off 2, 4, 8... days (we never try to get past it); the other option is to scrape it on your Mac too (see below).
+
+Your Mac's nightly job (`scripts/install_launchd.sh`) is **not needed any more** and was uninstalled; Dan Murphy's
+was blocked from it anyway. `scripts/daily_run.sh` still works if you ever want the Mac to scrape something
+(`BEEROO_DATA_REMOTE` hands its pages to the cloud inbox).
 
 ## One-time setup
 

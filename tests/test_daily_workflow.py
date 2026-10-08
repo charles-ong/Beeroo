@@ -40,7 +40,7 @@ def triggers(wf):
 def test_four_schedules_a_day_and_manual_runs_with_inputs(wf):
     assert [c["cron"] for c in triggers(wf)["schedule"]] == ["0 19 * * *", "0 1 * * *", "0 7 * * *", "0 13 * * *"]
     inputs = triggers(wf)["workflow_dispatch"]["inputs"]
-    assert inputs["retailers"]["options"] == ["both", "bws", "liquorland"]
+    assert inputs["retailers"]["options"] == ["all", "bws", "dan_murphys", "liquorland"]
     assert inputs["clear_backoff"]["options"] == ["none", "bws", "liquorland", "all"]
     assert wf["permissions"] == {"contents": "write"}
     assert wf["concurrency"] == {"group": "daily-scrape", "cancel-in-progress": False}
@@ -68,7 +68,7 @@ def legs(matrix):
 
 def test_plan_evening_run_does_bws_fully_and_one_liquorland_state(wf, tmp_path):
     proc, m = run_plan(wf, OUT=tmp_path / "o", SCHEDULE="0 19 * * *")
-    assert proc.returncode == 0 and legs(m) == [("bws", "8"), ("liquorland", "1")]
+    assert proc.returncode == 0 and legs(m) == [("bws", "8"), ("dan_murphys", "7"), ("liquorland", "1")]
 
 
 @pytest.mark.parametrize("cron", ["0 1 * * *", "0 7 * * *", "0 13 * * *"])
@@ -78,10 +78,12 @@ def test_plan_other_runs_do_one_liquorland_state_only(wf, tmp_path, cron):
 
 
 @pytest.mark.parametrize("choice,zones,expected", [
-    ("both", "", [("bws", "8"), ("liquorland", "1")]),
+    ("all", "", [("bws", "8"), ("dan_murphys", "7"), ("liquorland", "1")]),
     ("bws", "", [("bws", "8")]),
+    ("dan_murphys", "", [("dan_murphys", "7")]),
+    ("dan_murphys", "3", [("dan_murphys", "3")]),
     ("liquorland", "3", [("liquorland", "3")]),
-    ("both", "2", [("bws", "2"), ("liquorland", "2")]),
+    ("all", "2", [("bws", "2"), ("dan_murphys", "2"), ("liquorland", "2")]),
 ])
 def test_plan_manual_runs_follow_the_inputs(wf, tmp_path, choice, zones, expected):
     _, m = run_plan(wf, OUT=tmp_path / "o", RETAILERS=choice, ZONES=zones)
@@ -90,7 +92,7 @@ def test_plan_manual_runs_follow_the_inputs(wf, tmp_path, choice, zones, expecte
 
 @pytest.mark.parametrize("bad", ["0", "9", "x", "1; rm -rf /"])
 def test_plan_rejects_a_bad_zone_count(wf, tmp_path, bad):
-    proc, _ = run_plan(wf, OUT=tmp_path / "o", RETAILERS="both", ZONES=bad)
+    proc, _ = run_plan(wf, OUT=tmp_path / "o", RETAILERS="all", ZONES=bad)
     assert proc.returncode != 0
 
 
@@ -140,8 +142,12 @@ def test_secrets_only_reach_the_steps_that_need_them_and_never_the_shell_text(wf
                        "Save the database to the data branch", "Deploy to Cloudflare Pages"}
 
 
-def test_the_cloud_never_scrapes_dan_murphys(wf):
-    assert "dan_murphys" not in yaml.dump(wf["jobs"]["plan"]) and "dan_murphys" not in yaml.dump(wf["jobs"]["scrape"])
+def test_dan_murphys_runs_once_a_day_in_the_cloud_in_the_evening_slot_only(wf, tmp_path):
+    _, evening = run_plan(wf, OUT=tmp_path / "a", SCHEDULE="0 19 * * *")
+    assert ("dan_murphys", "7") in legs(evening)
+    for cron in ("0 1 * * *", "0 7 * * *", "0 13 * * *"):
+        _, other = run_plan(wf, OUT=tmp_path / cron.replace(" ", "_").replace("*", "x"), SCHEDULE=cron)
+        assert "dan_murphys" not in [r for r, _ in legs(other)]
 
 
 def test_summary_title_is_configurable():

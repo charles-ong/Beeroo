@@ -37,7 +37,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from common.states import STATES  # noqa: E402
+from common.states import STATES, has_stores  # noqa: E402
 
 DEFAULT_STATE = ROOT / "data" / "scrape_state.json"
 DEFAULT_DB = ROOT / "data" / "beeroo.sqlite3"
@@ -316,7 +316,9 @@ def run(*, state_path, scrapes, push, now=None, retailers=None, zones_per_run=le
             log.info("%s: backing off until %s; skipping", name, until.isoformat())
             results.append({"retailer": name, "status": "backing_off", "until": until.isoformat()})
             continue
-        plan[name] = [zone] if zone else pick_zones(rstate, zones, zones_per_run)
+        # a retailer with no stores in a state (Dan Murphy's in the NT) is never visited there
+        usable = [z for z in zones if has_stores(name, z)]
+        plan[name] = ([zone] if has_stores(name, zone) else []) if zone else pick_zones(rstate, usable, zones_per_run)
 
     stopped, last_end, started = set(), {}, False
     failures = {}      # consecutive error/push_failed results per retailer

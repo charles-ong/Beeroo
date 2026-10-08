@@ -78,6 +78,12 @@ def clone(remote, dest):
     return False
 
 
+def _digest(path):
+    import hashlib
+    path = Path(path)
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.exists() else None
+
+
 def head_files(repo, prefix):
     proc = git(["ls-tree", "-r", "--name-only", "HEAD", prefix], cwd=repo, check=False)
     return set(proc.stdout.split()) if proc.returncode == 0 else set()
@@ -150,6 +156,10 @@ def save(remote, clone_dir, db_path, state_paths=(), attempts=4):
             else:  # lost a race with a push-inbox: start from the new tip, keep its new inbox files
                 fresh = work / "fresh"
                 clone(remote, fresh)
+                if _digest(fresh / DB_NAME) != _digest(clone_dir / DB_NAME):
+                    # someone saved a newer database since we restored: replacing it would lose their changes
+                    raise DataBranchError("the database on the data branch changed while this run was working "
+                                          "(another run saved it); nothing was overwritten, run it again")
                 tip = git(["rev-parse", "HEAD"], cwd=fresh, check=False).stdout.strip() or None
                 shutil.copytree(clone_dir, tree, ignore=shutil.ignore_patterns(".git"))
                 for rel in head_files(fresh, "inbox") - seen:

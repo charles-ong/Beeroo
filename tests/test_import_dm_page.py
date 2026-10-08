@@ -156,7 +156,9 @@ def test_main_dry_run_sends_nothing(no_env, tmp_path, capsys):
     path = tmp_path / "dm.json"
     path.write_text(json.dumps(CARDS))
     code = imp.main([str(path), "--state", "NSW", "--dry-run", "--db", str(tmp_path / "x.sqlite3")])
-    assert code == 0 and "48 products found" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert code == 0 and "48 products found" in out
+    assert "showing a NSW store" in out and "differ by state" in out          # the reminder that cost us 6 wrong states
     assert not (tmp_path / "x.sqlite3").exists()
 
 

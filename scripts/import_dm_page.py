@@ -325,6 +325,8 @@ def main(argv=None):
         prices = sum(len(p.prices) for p in products)
         print(f"{unique} products found, {len(products)} with online prices ({prices} price options), "
               f"{len(errors)} skipped; filed under {body['location']['state']}, observed {observed:%Y-%m-%d %H:%M} UTC")
+        print(f"Check: the site must have been showing a {body['location']['state']} store when you copied this. "
+              "Dan Murphy's prices and range differ by state; identical files for two states mean the store wasn't changed.")
         if args.dry_run:
             print("dry run: nothing sent")
             return 0

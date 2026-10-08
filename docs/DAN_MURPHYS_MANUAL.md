@@ -7,6 +7,12 @@ visit to their site is involved. A few minutes per state, probably weekly.
 Dan Murphy's has no stores in the Northern Territory, so there is nothing to import for NT (the site says so, and
 the freshness report marks it n/a). The other seven states and territories are covered.
 
+**Check the store really changed.** Dan Murphy's prices and range **differ by state** (about 1 product in 9 between NSW and
+ACT, and each state stocks some products the other doesn't). The first hand imports of all seven states came out identical, which
+means the site was still on one store: those prices were filed under the wrong states and have been removed. After changing the store,
+check the store name the site shows near the top, and after importing, glance at a few prices against another state's. The daily
+cloud job now scrapes every state itself, so you only need this when it is backing off.
+
 ## Each time (per state)
 
 1. **Set the store.** On danmurphys.com.au choose pick-up/delivery and enter the state's pricing postcode:

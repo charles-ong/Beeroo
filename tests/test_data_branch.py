@@ -220,3 +220,20 @@ def test_ingest_inbox_ingests_a_real_page_and_deletes_it(tmp_path):
 def test_an_unreachable_remote_is_an_error_not_an_empty_branch(tmp_path):
     with pytest.raises(dbr.DataBranchError):
         dbr.clone(str(tmp_path / "nothing-here.git"), tmp_path / "c")
+
+
+def test_a_save_never_overwrites_a_database_someone_else_saved_meanwhile(remote, tmp_path):
+    first, theirs = tmp_path / "first.sqlite3", tmp_path / "theirs.sqlite3"
+    make_db(first, rows=1)
+    make_db(theirs, rows=9)
+    dbr.restore(remote, tmp_path / "mine", tmp_path / "d")
+    dbr.save(remote, tmp_path / "mine", first)
+
+    dbr.restore(remote, tmp_path / "mine", tmp_path / "d")                 # this run starts from the 1-row database
+    dbr.restore(remote, tmp_path / "other", tmp_path / "d2")
+    dbr.save(remote, tmp_path / "other", theirs)                           # another run saves a newer one first
+
+    with pytest.raises(dbr.DataBranchError, match="changed while this run was working"):
+        dbr.save(remote, tmp_path / "mine", first)
+    dbr.restore(remote, tmp_path / "check", tmp_path / "d3")
+    assert sqlite3.connect(tmp_path / "d3" / dbr.DB_NAME).execute("SELECT COUNT(*) FROM t").fetchone()[0] == 9

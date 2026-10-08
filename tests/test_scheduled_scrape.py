@@ -161,12 +161,13 @@ def test_a_default_run_visits_every_state_at_every_retailer_interleaved(state):
     calls = []
     scrapes = {n: fake(n, calls=calls) for n in ALL}
     code, results, pushed = go(state, scrapes)
-    assert code == 0 and len(calls) == 24 and len(pushed) == 24 and {r["status"] for r in results} == {"ok"}
+    assert code == 0 and len(calls) == 23 and len(pushed) == 23 and {r["status"] for r in results} == {"ok"}   # 8 states x 3 retailers, minus Dan Murphy's in the NT
     # NSW (2100) at all three sites first, then ACT (2600), and so on: no site is hit back to back
     assert [c[0] for c in calls[:6]] == ["bws", "liquorland", "dan_murphys"] * 2
     assert [c[1] for c in calls[:6]] == ["2100"] * 3 + ["2600"] * 3
     for name in ALL:
-        assert [c[1] for c in calls if c[0] == name] == [STATES[z]["postcode"] for z in ss.ZONES]
+        wanted = [z for z in ss.ZONES if not (name == "dan_murphys" and z == "NT")]
+        assert [c[1] for c in calls if c[0] == name] == [STATES[z]["postcode"] for z in wanted]
 
 
 def test_postcodes_passed_to_the_scrapers_come_from_the_states_table(state):
@@ -203,9 +204,9 @@ def test_push_bodies_carry_kind_location_and_capture_time(state):
 
 def test_retailer_filter_forced_state_and_jitter_once(state):
     clock, calls = Clock(), []
-    go(state, {n: fake(n, calls=calls) for n in ALL}, retailers=["dan_murphys"], zone="NT", max_pages=3,
+    go(state, {n: fake(n, calls=calls) for n in ALL}, retailers=["dan_murphys"], zone="TAS", max_pages=3,
        jitter=600, clock=clock)
-    assert calls == [("dan_murphys", "0800", 3)] and len(clock.slept) == 1 and 0 <= clock.slept[0] <= 600
+    assert calls == [("dan_murphys", "7000", 3)] and len(clock.slept) == 1 and 0 <= clock.slept[0] <= 600
 
 
 # ---- politeness: spacing between sessions on the same site -----------------------
@@ -372,7 +373,7 @@ def test_cli_includes_liquorland_by_default_and_all_states(tmp_path, monkeypatch
     monkeypatch.setattr(ss, "real_scrapes", lambda browser_path=None: {n: fake(n, calls=calls) for n in ALL})
     monkeypatch.delenv("BEEROO_SKIP_RETAILERS", raising=False)
     code = ss.main(["--db", str(tmp_path / "x.sqlite3"), "--state", str(tmp_path / "s.json"), "--min-spacing", "0"])
-    assert code == 0 and len(calls) == 24 and {c[0] for c in calls} == set(ALL)
+    assert code == 0 and len(calls) == 23 and {c[0] for c in calls} == set(ALL)
 
 
 def test_cli_rejects_unknown_retailers_and_states():
@@ -589,3 +590,20 @@ def test_when_every_page_is_rejected_it_is_a_push_failure(state, tmp_path):
     _, results, _ = go(state, {"dan_murphys": fake("dan_murphys", pages=2)}, push=reject, zone="NSW")
     assert results[0]["status"] == "push_failed" and results[0]["error"] == "parse: nope"
     assert len(list((tmp_path / "failed").glob("*.json"))) == 2
+
+
+# ---- a retailer is never sent to a state where it has no stores ---------------------------------
+
+
+def test_dan_murphys_is_never_visited_in_the_nt(state):
+    calls = []
+    code, results, _ = go(state, {"dan_murphys": fake("dan_murphys", calls=calls)}, retailers=["dan_murphys"])
+    assert code == 0 and len(results) == 7 and "0800" not in {c[1] for c in calls}
+    assert {r["zone"] for r in results} == {"NSW", "ACT", "VIC", "QLD", "SA", "WA", "TAS"}
+
+
+def test_asking_for_dan_murphys_in_the_nt_does_nothing_and_other_retailers_still_do(state):
+    calls = []
+    scrapes = {n: fake(n, calls=calls) for n in ALL}
+    _, results, _ = go(state, scrapes, zone="NT")
+    assert sorted(c[0] for c in calls) == ["bws", "liquorland"] and {r["retailer"] for r in results} == {"bws", "liquorland"}
