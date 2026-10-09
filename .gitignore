@@ -19,3 +19,5 @@ data/backups/
 site/
 data/failed/
 data/outbox/
+*.sqlite3-shm
+*.sqlite3-wal
