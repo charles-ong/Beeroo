@@ -182,6 +182,7 @@ def test_exported_site_works_in_a_real_browser(site):
         with pw.sync_playwright() as p:
             browser = p.chromium.launch(headless=True, executable_path=str(CHROMIUM))
             page = browser.new_page(viewport={"width": 1100, "height": 900})
+            page.add_init_script("localStorage.setItem('beeroo.age18', '1')")   # skip the 18+ gate
             problems = []
             page.on("console", lambda m: problems.append(m.text) if m.type in ("error", "warning") else None)
             page.on("pageerror", lambda e: problems.append(str(e)))
@@ -253,6 +254,7 @@ def test_new_filters_work_in_a_real_browser(site):
         with pw.sync_playwright() as p:
             browser = p.chromium.launch(headless=True, executable_path=str(CHROMIUM))
             page = browser.new_page(viewport={"width": 1100, "height": 900})
+            page.add_init_script("localStorage.setItem('beeroo.age18', '1')")   # skip the 18+ gate
             problems = []
             page.on("console", lambda m: problems.append(m.text) if m.type in ("error", "warning") else None)
             page.on("pageerror", lambda e: problems.append(str(e)))
@@ -381,6 +383,7 @@ def test_reviews_show_on_cards_and_in_the_modal(site):
         with pw.sync_playwright() as p:
             browser = p.chromium.launch(headless=True, executable_path=str(CHROMIUM))
             page = browser.new_page(viewport={"width": 1100, "height": 900})
+            page.add_init_script("localStorage.setItem('beeroo.age18', '1')")   # skip the 18+ gate
             problems = []
             page.on("console", lambda m: problems.append(m.text) if m.type in ("error", "warning") else None)
             page.on("pageerror", lambda e: problems.append(str(e)))
@@ -428,6 +431,7 @@ def test_the_scraper_and_the_manual_snippet_read_the_stars_from_real_cards():
     with pw.sync_playwright() as p:
         browser = p.chromium.launch(headless=True, executable_path=str(CHROMIUM))
         page = browser.new_page()
+        page.add_init_script("localStorage.setItem('beeroo.age18', '1')")   # skip the 18+ gate
         page.set_content(html)
         scraped = page.evaluate(dan_murphys._CARDS_JS)
         page.evaluate("window.copy = (text) => { window.copied = text; }")
@@ -468,6 +472,7 @@ def test_prices_from_line_names_the_actual_stores(site, tmp_path):
         with pw.sync_playwright() as p:
             browser = p.chromium.launch(headless=True, executable_path=str(CHROMIUM))
             page = browser.new_page()
+            page.add_init_script("localStorage.setItem('beeroo.age18', '1')")   # skip the 18+ gate
             page.goto(f"http://127.0.0.1:{srv.server_port}/")
             page.wait_for_function("document.querySelectorAll('#state option').length === 9")
             page.select_option("#state", "ACT")

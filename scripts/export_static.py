@@ -81,6 +81,9 @@ def copy_site(out_dir):
     (out / "static").mkdir(parents=True, exist_ok=True)
     for name in ("style.css", "app.js", "staticdata.js"):
         shutil.copy(static / name, out / "static" / name)
+    # content files served from the site root (terms.html and privacy.html link to static/style.css)
+    for name in ("sponsored.json", "terms.html", "privacy.html"):
+        shutil.copy(static / name, out / name)
     html = (static / "index.html").read_text(encoding="utf-8")
     html = html.replace("<head>", '<head>\n<meta name="beeroo-mode" content="static">', 1)
     (out / "index.html").write_text(html, encoding="utf-8")

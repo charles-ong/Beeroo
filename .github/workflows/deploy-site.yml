@@ -13,6 +13,7 @@ on:
     branches: [main]
     paths:
       - "app/static/**"
+      - "functions/**"
       - "app/queries.py"
       - "common/beer_types.py"
       - "scripts/export_static.py"

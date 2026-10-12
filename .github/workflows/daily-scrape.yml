@@ -254,6 +254,17 @@ jobs:
           fi
           scripts/deploy_cloudflare.sh site
 
+      - name: Send price-alert emails
+        # Skips itself until the alert secrets exist (docs/ALERTS.md); an email problem must never fail the publish.
+        continue-on-error: true
+        env:
+          BEEROO_SITE_URL: ${{ vars.BEEROO_SITE_URL }}
+          ALERTS_ADMIN_TOKEN: ${{ secrets.ALERTS_ADMIN_TOKEN }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          ALERTS_FROM: ${{ vars.ALERTS_FROM }}
+          ALERTS_FOOTER: ${{ vars.ALERTS_FOOTER }}
+        run: python scripts/send_alerts.py --db data/beeroo.sqlite3
+
       - name: Keep rejected pages
         if: always()
         uses: actions/upload-artifact@v4

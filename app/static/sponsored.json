@@ -1,0 +1,18 @@
+{
+  "_help": "Paid placements shown above the product list. Edit, commit and push to main (the site redeploys). 'states' empty = everywhere. 'starts'/'ends' are YYYY-MM-DD and optional. Only https: and mailto: links are allowed. Remove 'example' (and the placeholder text) when you sign a real sponsor. First eligible placement wins.",
+  "contact": "sponsors@beeroo.example",
+  "placements": [
+    {
+      "id": "example",
+      "example": true,
+      "sponsor": "Your Brewery Here",
+      "headline": "Put your beer at the top of the list",
+      "body": "This is an example sponsored placement. Craft brewers and distributors can promote a beer to people comparing prices in their state, clearly labelled as paid.",
+      "cta": "Get in touch",
+      "url": "mailto:sponsors@beeroo.example?subject=Sponsored%20placement",
+      "states": [],
+      "starts": "",
+      "ends": ""
+    }
+  ]
+}

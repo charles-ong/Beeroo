@@ -35,6 +35,8 @@ BIG="$(find "$SITE" -type f -size +"${MAX_FILE_MB}"M | head -1)"
 [ -z "$BIG" ] || { echo "$BIG is larger than ${MAX_FILE_MB} MiB (free-tier file limit)" >&2; exit 2; }
 
 # Creating an existing project fails harmlessly; a real auth problem shows up in the deploy below.
+# Run from the repo root so wrangler also uploads ./functions (the /api/alerts endpoints, docs/ALERTS.md).
+cd "$REPO"
 npx --yes "$WRANGLER" pages project create "$PROJECT" --production-branch "$BRANCH" >/dev/null 2>&1 || true
 npx --yes "$WRANGLER" pages deploy "$SITE" --project-name "$PROJECT" --branch "$BRANCH" --commit-dirty=true
 echo "deployed $COUNT files to https://$PROJECT.pages.dev"

@@ -99,6 +99,7 @@
   </section>
 
   <p id="summary" class="summary" aria-live="polite"></p>
+  <div id="sponsored"></div>
   <div id="results"></div>
   <div class="pager"><button id="more" hidden>Show more</button></div>
 </main>
@@ -107,6 +108,18 @@
   <div class="dlg">
     <button class="close" id="detail-close" aria-label="Close">×</button>
     <div id="detail-body"></div>
+  </div>
+</dialog>
+
+<dialog id="agegate" aria-labelledby="agegate-title">
+  <div class="dlg agegate">
+    <h2 id="agegate-title">Are you 18 or over?</h2>
+    <p id="agegate-text">Beeroo compares alcohol prices, so you need to be of legal drinking age (18+ in Australia) to continue.</p>
+    <div class="row">
+      <button id="age-yes" type="button">Yes, I'm 18 or over</button>
+      <button id="age-no" type="button" class="toggle">No</button>
+    </div>
+    <p class="small">We remember your answer on this device only. <a href="terms.html">Terms</a> · <a href="privacy.html">Privacy</a></p>
   </div>
 </dialog>
 
@@ -123,8 +136,10 @@
     <p>These are the retailers' own promises, not ours. Conditions and exclusions apply, so check their terms before relying on them.</p>
   </details>
   <p>Prices belong to the retailers named and link to their product pages. Beeroo isn't affiliated with Dan Murphy's, BWS or Liquorland.</p>
+  <p><strong>How Beeroo is funded.</strong> Some links to retailers may be affiliate links, which pay Beeroo a commission if you buy; they never change the price you pay or the order of results. Paid placements are labelled "Sponsored" and sit apart from the price rankings. <a href="terms.html#funding">More</a>.</p>
   <p><strong>Drink responsibly.</strong> You must be 18+ to purchase alcohol. For support see <a href="https://drinkwise.org.au" rel="noopener">drinkwise.org.au</a>.</p>
 </footer>
+<p class="wrap foot"><a href="terms.html">Terms of use</a> · <a href="privacy.html">Privacy policy</a></p>
 <script src="static/staticdata.js"></script>
 <script src="static/app.js"></script>
 </body>

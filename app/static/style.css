@@ -169,3 +169,24 @@ a { color:var(--accent); }
   .f select { min-width:0; width:100%; } .frow > .f { flex:1 1 100%; }
   .pair select { min-width:0; flex:1; }
 }
+
+/* ---- sponsored placement, age gate, alerts ---- */
+.sponsored { background:var(--accent-soft); border:1px dashed var(--accent); border-radius:var(--radius); padding:12px 14px; margin:0 0 12px;
+  display:flex; flex-wrap:wrap; align-items:center; gap:6px 16px; }
+.sponsored .tagline { flex:1 1 20rem; min-width:0; }
+.sponsored .label { font-size:.72rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--accent); }
+.sponsored h2 { margin:.1rem 0 .15rem; font-size:1.05rem; }
+.sponsored p { margin:0; font-size:.9rem; color:var(--muted); }
+.sponsored a.cta { background:var(--accent); color:var(--accent-ink); border-radius:9px; padding:.55rem 1rem; font-weight:700; text-decoration:none; min-height:44px; display:inline-flex; align-items:center; }
+.sponsored .fine { flex:1 0 100%; font-size:.75rem; }
+.agegate { max-width:30rem; }
+.agegate .row { gap:10px; flex-wrap:wrap; margin:14px 0 6px; }
+#agegate::backdrop { background:rgba(20,10,0,.88); }
+.alertbox { border:1px solid var(--line); border-radius:var(--radius); padding:12px 14px; margin:10px 0; background:var(--bg); }
+.alertbox form { display:flex; flex-wrap:wrap; gap:10px 12px; align-items:flex-end; }
+.alertbox label { display:flex; flex-direction:column; font-size:.82rem; font-weight:600; color:var(--muted); gap:4px; }
+.alertbox .hp { position:absolute; left:-9999px; width:1px; height:1px; overflow:hidden; }
+.alertbox .msg { flex:1 0 100%; margin:0; font-weight:600; }
+.alertbox .msg.ok { color:var(--good); } .alertbox .msg.bad { color:var(--err); }
+.legal { max-width:46rem; margin:0 auto; padding:24px 16px 48px; }
+.legal h1 { font-size:1.8rem; } .legal h2 { margin-top:1.6rem; font-size:1.15rem; }

@@ -188,6 +188,7 @@ async function search(append) {
         ? "No products match these filters for this state. Try clearing some filters."
         : `No prices for ${data.locations.state_name} yet.`));
     }
+    if (!append) renderSponsored();
     data.products.forEach((p) => list.append(card(p)));
     state_.offset += data.products.length;
     $("more").hidden = state_.offset >= data.meta.total;
@@ -302,6 +303,7 @@ function detailBody(d) {
     h("div", { class: "meta" }, h("span", { class: "badge kind" }, p.type), p.unit_volume_ml ? h("span", {}, Math.round(p.unit_volume_ml) + " mL") : null, abvBadge(p)),
     h("div", { class: "meta" }, ratingBadge(p)),
     h("h3", {}, "Prices"), table,
+    h("h3", {}, "Price alert"), alertBox(p),
     h("h3", {}, "Reviews"), reviewsSection(p),
     h("h3", {}, "Price history"),
     d.demo ? h("p", { class: "banner demo" }, "Demo data: this history is simulated.") : null,
@@ -315,6 +317,95 @@ async function openDetail(id) {
     $("detail-body").replaceChildren(detailBody(d));
     $("detail").showModal();
   } catch (e) { alert(e.message); }
+}
+
+
+// ---- Age gate ---------------------------------------------------------------
+// Alcohol content: ask once per device. The answer stays in localStorage only.
+function initAgeGate() {
+  const dlg = $("agegate");
+  if (store("beeroo.age18") === "1" || typeof dlg.showModal !== "function") return;
+  dlg.addEventListener("cancel", (e) => e.preventDefault());       // Escape must not skip it
+  $("age-yes").addEventListener("click", () => { save("beeroo.age18", "1"); dlg.close(); });
+  $("age-no").addEventListener("click", () => {
+    $("agegate-title").textContent = "Sorry, you can't use Beeroo";
+    $("agegate-text").replaceChildren("You must be 18 or over to view alcohol prices. If you want to talk to someone about alcohol, visit ",
+      h("a", { href: "https://drinkwise.org.au", rel: "noopener" }, "drinkwise.org.au"), ".");
+    $("age-yes").hidden = true; $("age-no").hidden = true;
+  });
+  dlg.showModal();
+}
+
+// ---- Sponsored placement ----------------------------------------------------
+// sponsored.json lists paid placements. One is shown above the list, labelled, and never affects ranking.
+let sponsoredConfig = { placements: [] };
+const today = () => new Date().toISOString().slice(0, 10);
+function eligiblePlacement(cfg, region, day) {
+  return (cfg.placements || []).find((x) =>
+    (!x.states || !x.states.length || x.states.includes(region))
+    && (!x.starts || x.starts <= day) && (!x.ends || day <= x.ends)
+    && /^(https:|mailto:)/.test(x.url || ""));
+}
+function renderSponsored() {
+  const x = eligiblePlacement(sponsoredConfig, state_.region, today());
+  if (!x) return $("sponsored").replaceChildren();
+  $("sponsored").replaceChildren(h("aside", { class: "sponsored", "aria-label": "Sponsored" },
+    h("div", { class: "tagline" },
+      h("div", { class: "label" }, "Sponsored" + (x.example ? " · example placement" : "") + " · " + x.sponsor),
+      h("h2", {}, x.headline), h("p", {}, x.body)),
+    h("a", { class: "cta", href: x.url, rel: "sponsored noopener noreferrer", target: x.url.startsWith("https:") ? "_blank" : null }, x.cta || "Learn more"),
+    h("p", { class: "fine sub" }, "Paid placement. It doesn't change the price rankings below. 18+ only. Drink responsibly.")));
+}
+async function loadSponsored() {
+  try { sponsoredConfig = await loadJson("sponsored.json"); } catch { sponsoredConfig = { placements: [] }; }
+}
+
+// ---- Price alerts -----------------------------------------------------------
+// Needs the /api/alerts function (functions/ folder, Cloudflare Pages). Without it the form says so politely.
+function alertPacks(p) {
+  const seen = new Map();
+  for (const e of Object.values(p.retailers)) {
+    for (const o of e.options) {
+      const key = o.pack_type + ":" + o.units;
+      if (!seen.has(key)) seen.set(key, o.label);
+    }
+  }
+  return [...seen].sort((a, b) => a[0].split(":")[1] - b[0].split(":")[1]);
+}
+function alertBox(p) {
+  const packs = alertPacks(p);
+  if (!STATIC_MODE || !packs.length) return h("p", { class: "sub" }, "Price alerts aren't available here.");
+  const msg = h("p", { class: "msg", role: "status" });
+  const pack = h("select", { id: "alert-pack", "aria-label": "Pack size" }, packs.map(([k, label]) => h("option", { value: k }, label)));
+  const target = h("input", { id: "alert-target", type: "number", min: "1", max: "999", step: "0.01", inputmode: "decimal", placeholder: "Any new low" });
+  const email = h("input", { id: "alert-email", type: "email", required: true, autocomplete: "email", maxlength: "254", value: store("beeroo.email") || "" });
+  const trap = h("input", { name: "website", tabindex: "-1", autocomplete: "off", "aria-hidden": "true" });
+  const go = h("button", { type: "submit" }, "Email me");
+  const form = h("form", {},
+    h("label", {}, "Pack", pack),
+    h("label", {}, "Alert me at or below ($)", target),
+    h("label", {}, "Your email", email),
+    h("div", { class: "hp" }, trap), go, msg);
+  form.addEventListener("submit", async (ev) => {
+    ev.preventDefault();
+    go.disabled = true; msg.className = "msg"; msg.textContent = "Saving…";
+    try {
+      const res = await fetch("/api/alerts", { method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: email.value.trim(), product_id: p.id, state: state_.region, pack: pack.value,
+          target: target.value ? Number(target.value) : null, website: trap.value }) });
+      const out = await res.json().catch(() => ({}));
+      if (res.status === 404) throw new Error("Price alerts aren't switched on for this site yet.");
+      if (!res.ok) throw new Error(out.error || "Couldn't save the alert. Please try again.");
+      save("beeroo.email", email.value.trim());
+      msg.className = "msg ok"; msg.textContent = out.message || "Alert saved.";
+    } catch (e) {
+      msg.className = "msg bad"; msg.textContent = e.message;
+    } finally { go.disabled = false; }
+  });
+  return h("div", { class: "alertbox" },
+    h("p", { class: "sub" }, "We'll email you when this beer drops to your price at any retailer in " + state_.region + ", based on the prices we collect each day. Leave the price blank to be told when it hits its lowest price we've recorded. Free: up to 3 alerts."),
+    form,
+    h("p", { class: "sub" }, "We'll only email about your alerts, and every email has a one-click unsubscribe. See the ", h("a", { href: "privacy.html" }, "privacy policy"), "."));
 }
 
 // ---- Wiring -----------------------------------------------------------------
@@ -420,7 +511,9 @@ async function loadStates() {
   return (await api("/api/states")).states;
 }
 async function init() {
+  initAgeGate();
   buildStaticFilters();
+  await loadSponsored();
   try {
     state_.states = await loadStates();
   } catch (e) { return showStateError("Couldn't load the list of states. Please reload."); }
