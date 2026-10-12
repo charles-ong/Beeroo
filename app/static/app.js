@@ -101,6 +101,7 @@ function filterParams() {
     min_units: $("min_units").value, max_units: $("max_units").value,
     min_abv: $("min_abv").value, max_abv: $("max_abv").value,
     include_member: $("include_member").checked, min_retailers: $("multi").checked ? 2 : "",
+    best_only: $("best_only").checked && state_.retailers.size > 0,
   };
 }
 // The API names differ slightly from the form's (repeatable "retailer" and "type").
@@ -165,7 +166,7 @@ function renderLocations(loc) {
     if (!l) return null;
     return `${r.name}: ${storeLabel(r, l)}`;
   }).filter(Boolean);
-  $("stores").textContent = parts.length ? "Prices from — " + parts.join(" · ") : "";
+  $("stores").textContent = parts.length ? "Prices from - " + parts.join(" · ") : "";
 }
 
 async function search(append) {
@@ -339,7 +340,7 @@ $("reverse").addEventListener("click", () => {
   $("reverse").setAttribute("aria-pressed", String(on));
   search(false);
 });
-for (const id of ["sort", "min_units", "max_units", "min_abv", "max_abv", "include_member", "multi"]) {
+for (const id of ["sort", "min_units", "max_units", "min_abv", "max_abv", "include_member", "multi", "best_only"]) {
   $(id).addEventListener("change", () => search(false));
 }
 
@@ -380,6 +381,8 @@ function buildStaticFilters() {
       const on = !state_.retailers.has(r.id);
       on ? state_.retailers.add(r.id) : state_.retailers.delete(r.id);
       chip.setAttribute("aria-pressed", String(on));
+      $("best_only").disabled = state_.retailers.size === 0;      // "best price at a picked retailer" needs a pick
+      if ($("best_only").disabled) $("best_only").checked = false;
       search(false);
     });
     return chip;
@@ -401,6 +404,8 @@ function buildStaticFilters() {
     $("reverse").setAttribute("aria-pressed", "false");
     $("include_member").checked = true;
     $("multi").checked = false;
+    $("best_only").checked = false;
+    $("best_only").disabled = true;
     state_.retailers.clear();
     document.querySelectorAll(".chip").forEach((c) => c.setAttribute("aria-pressed", "false"));
     search(false);

@@ -213,6 +213,19 @@ def load_products(conn, locations, now=None):
     return list(products.values())
 
 
+def best_retailers(product, sort="value"):
+    """Who has the lowest price on the metric the list is being judged by, ties included: price per standard
+    drink (or per can/bottle when that is the sort, or when ABV is unknown). Needs 2+ retailers to compete,
+    otherwise nobody "wins". Mirrored in staticdata.js."""
+    for metric in (("unit_price", "value") if sort == "unit_price" else ("value", "unit_price")):
+        field, key = ("best_value", "price_per_standard_drink") if metric == "value" else ("cheapest_unit", "unit_price")
+        scored = {r: e[field][key] for r, e in product["retailers"].items() if e[field]}
+        if len(scored) >= 2:
+            low = min(scored.values())
+            return {r for r, v in scored.items() if v == low}
+    return set()
+
+
 def rating_score(product):
     """What "highest rated" sorts by: the rating, nudged toward the prior when there are few reviews."""
     votes = product.get("review_count") or 1
@@ -324,7 +337,7 @@ def ordered(products, sort, reverse=False):
 
 def compare(conn, state, q="", sort="value", include_member=True, retailers=None,
             min_abv=None, max_abv=None, min_retailers=1, min_units=None, max_units=None,
-            types=None, reverse=False, limit=50, offset=0, now=None):
+            types=None, reverse=False, best_only=False, limit=50, offset=0, now=None):
     if sort not in SORTS:
         raise ValueError(f"sort must be one of {sorted(SORTS)}")
     unknown = set(types or []) - set(TYPES)
@@ -346,6 +359,8 @@ def compare(conn, state, q="", sort="value", include_member=True, retailers=None
         if wanted and not wanted <= set(p["retailers"]):      # sold by EVERY picked retailer; none picked = any
             continue
         if wanted_types and p["type"] not in wanted_types:
+            continue
+        if best_only and wanted and not best_retailers(p, sort) & wanted:     # needs picked retailers to mean anything
             continue
         if len(p["retailers"]) < min_retailers:
             continue

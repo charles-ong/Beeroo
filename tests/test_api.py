@@ -384,3 +384,69 @@ def test_reverse_is_off_by_default_and_accepted_as_a_flag(client):
     b = client.get("/api/compare", params={"state": "ACT", "limit": 5, "reverse": False}).json()["products"]
     c = client.get("/api/compare", params={"state": "ACT", "limit": 5, "reverse": True}).json()["products"]
     assert a == b and a != c
+
+
+# ---- "only where a picked retailer has the best price" -------------------------------------------------------
+
+
+def seeded_prices(tmp_path, rows):
+    """rows: (retailer, sku, name, abv, units, price) all in ACT; returns a connection."""
+    from datetime import datetime, timezone
+    from common.pipeline import run_matching
+    from common.records import Listing, Location, PackType, PriceObservation, Retailer, ScrapedProduct
+    when = datetime(2026, 10, 8, tzinfo=timezone.utc)
+    conn = db.connect(str(tmp_path / "best.sqlite3"))
+    for retailer, sku, name, abv, units, price in rows:
+        loc = Location(retailer=Retailer(retailer), store_id="1", state="ACT", postcode="2600")
+        db.upsert_location(conn, loc)
+        item = Listing(retailer=Retailer(retailer), retailer_sku=sku, url=f"https://x/{retailer}/{sku}", name=name, abv=abv)
+        obs = PriceObservation(pack_type=PackType.PACK, units=units, price=price, location_key=loc.location_key, observed_at=when)
+        db.save_products(conn, [ScrapedProduct(listing=item, prices=[obs])], when)
+    run_matching(conn)
+    return conn
+
+
+def names(result):
+    return sorted(p["name"] for p in result["products"])
+
+
+def test_best_only_keeps_beers_a_picked_retailer_wins_ties_included(tmp_path):
+    conn = seeded_prices(tmp_path, [
+        ("bws", "1", "Cheap At Bws Lager Cans 375ml", 4.0, 6, 18.0), ("liquorland", "1", "Cheap At Bws Lager Cans 375ml", 4.0, 6, 20.0),
+        ("bws", "2", "Cheap At Ll Lager Cans 375ml", 4.0, 6, 21.0), ("liquorland", "2", "Cheap At Ll Lager Cans 375ml", 4.0, 6, 19.0),
+        ("bws", "3", "Tied Lager Cans 375ml", 4.0, 6, 20.0), ("liquorland", "3", "Tied Lager Cans 375ml", 4.0, 6, 20.0),
+        ("bws", "4", "Only At Bws Lager Cans 375ml", 4.0, 6, 15.0)])
+    get = lambda **kw: names(queries.compare(conn, "ACT", limit=50, **kw))
+    assert get(retailers=["bws"], best_only=True) == ["Cheap At Bws Lager Cans", "Tied Lager Cans"]
+    assert get(retailers=["liquorland"], best_only=True) == ["Cheap At Ll Lager Cans", "Tied Lager Cans"]
+    both = get(retailers=["bws", "liquorland"], best_only=True)           # stocked at both AND one of them wins
+    assert both == ["Cheap At Bws Lager Cans", "Cheap At Ll Lager Cans", "Tied Lager Cans"]
+    assert "Only At Bws Lager Cans" not in get(retailers=["bws"], best_only=True)      # nobody to beat is not "best"
+    assert get(retailers=["bws"]) == get(retailers=["bws"], best_only=False) != get(retailers=["bws"], best_only=True)
+
+
+def test_best_only_does_nothing_without_a_picked_retailer(tmp_path):
+    conn = seeded_prices(tmp_path, [("bws", "1", "A Lager Cans 375ml", 4.0, 6, 18.0), ("liquorland", "1", "A Lager Cans 375ml", 4.0, 6, 20.0)])
+    assert names(queries.compare(conn, "ACT", best_only=True)) == names(queries.compare(conn, "ACT"))
+
+
+def test_best_uses_price_per_can_when_the_abv_is_unknown(tmp_path):
+    conn = seeded_prices(tmp_path, [
+        ("bws", "1", "Mystery Beer Cans 375ml", None, 6, 18.0), ("liquorland", "1", "Mystery Beer Cans 375ml", None, 24, 60.0)])
+    assert names(queries.compare(conn, "ACT", retailers=["liquorland"], best_only=True)) == ["Mystery Beer Cans"]   # $2.50 each vs $3.00
+    assert names(queries.compare(conn, "ACT", retailers=["bws"], best_only=True)) == []
+
+
+def test_best_respects_the_member_and_quantity_filters(tmp_path):
+    conn = seeded_prices(tmp_path, [
+        ("bws", "1", "A Lager Cans 375ml", 4.0, 6, 18.0), ("liquorland", "1", "A Lager Cans 375ml", 4.0, 6, 20.0),
+        ("liquorland", "1", "A Lager Cans 375ml", 4.0, 24, 60.0)])             # Liquorland's 24-case is the best per can
+    assert names(queries.compare(conn, "ACT", retailers=["liquorland"], best_only=True)) == ["A Lager Cans"]
+    assert names(queries.compare(conn, "ACT", retailers=["liquorland"], best_only=True, max_units=6)) == []     # in 6-packs BWS wins
+
+
+def test_best_only_is_an_http_flag(client):
+    off = client.get("/api/compare", params={"state": "ACT", "retailer": "bws", "limit": 200}).json()["meta"]["total"]
+    on = client.get("/api/compare", params={"state": "ACT", "retailer": "bws", "best_only": True, "limit": 200}).json()
+    assert 0 < on["meta"]["total"] < off
+    assert all("bws" in p["retailers"] for p in on["products"])

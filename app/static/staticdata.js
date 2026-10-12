@@ -94,11 +94,24 @@
     return kept;
   }
 
+  // Retailers holding the lowest price on the metric the list is judged by, ties included (2+ must compete).
+  function bestRetailers(p, sort) {
+    for (const metric of sort === "unit_price" ? ["unit_price", "value"] : ["value", "unit_price"]) {
+      const [field, key] = metric === "value" ? ["best_value", "price_per_standard_drink"] : ["cheapest_unit", "unit_price"];
+      const scored = Object.entries(p.retailers).filter(([, e]) => e[field]).map(([r, e]) => [r, e[field][key]]);
+      if (scored.length >= 2) {
+        const low = Math.min(...scored.map((s) => s[1]));
+        return new Set(scored.filter((s) => s[1] === low).map((s) => s[0]));
+      }
+    }
+    return new Set();
+  }
+
   const num = (v) => (v == null || v === "" ? null : Number(v));
 
   /**
    * @param payload one exported state file {meta, locations, products}
-   * @param q {q, sort, reverse, include_member (default true), min_abv, max_abv, min_units, max_units,
+   * @param q {q, sort, reverse, best_only, include_member (default true), min_abv, max_abv, min_units, max_units,
    *           min_retailers, retailers: [ids], types: [names], limit, offset}
    * @returns same shape as GET /api/compare
    */
@@ -118,6 +131,7 @@
       const present = Object.keys(p.retailers);
       if (wanted && ![...wanted].every((r) => present.includes(r))) return false;   // sold by EVERY picked retailer
       if (wantedTypes && !wantedTypes.has(p.type)) return false;
+      if (q.best_only && wanted && ![...bestRetailers(p, sort)].some((r) => wanted.has(r))) return false;
       if (present.length < minRetailers) return false;
       if (minAbv !== null || maxAbv !== null) {
         if (p.abv == null) return false;

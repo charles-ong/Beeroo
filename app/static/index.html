@@ -93,6 +93,7 @@
     <div class="frow checks">
       <label class="chk"><input id="include_member" type="checkbox" checked> Include member / app offers</label>
       <label class="chk"><input id="multi" type="checkbox"> Only products at 2+ retailers</label>
+      <label class="chk" title="Pick one or more retailers above first. Judged by price per standard drink (or per can/bottle when you sort by that)."><input id="best_only" type="checkbox" disabled> Only where a picked retailer has the best price</label>
       <button id="clear" type="button" class="link">Clear filters</button>
     </div>
   </section>
@@ -115,6 +116,11 @@
     <p>An Australian standard drink contains 10 g of alcohol. Standard drinks = volume (litres) × ABV% × 0.789. Price per standard drink = pack price ÷ total standard drinks in the pack. It's a value comparison tool, not a recommendation to drink more.</p>
     <p>Where a retailer doesn't publish ABV we only show a value figure if the same product at another retailer does, and we say so. Otherwise it shows "ABV unknown".</p>
     <p>Prices are shelf prices for the nearest store or state we have data for, as last collected (see "updated" times) and may have changed. Member / app offers are included and labelled; untick the box to see regular prices only. Always check the retailer's site before buying.</p>
+  </details>
+  <details id="promises">
+    <summary>Price promises</summary>
+    <p>Dan Murphy's advertises a <strong>Lowest Liquor Price Guarantee</strong>: if you find a cheaper price, they won't just match it, they'll beat it. Liquorland advertises a <strong>Price Match Promise</strong>: show them a lower price on an identical stocked item at a competitor in the same state and they'll match it.</p>
+    <p>These are the retailers' own promises, not ours. Conditions and exclusions apply, so check their terms before relying on them.</p>
   </details>
   <p>Prices belong to the retailers named and link to their product pages. Beeroo isn't affiliated with Dan Murphy's, BWS or Liquorland.</p>
   <p><strong>Drink responsibly.</strong> You must be 18+ to purchase alcohol. For support see <a href="https://drinkwise.org.au" rel="noopener">drinkwise.org.au</a>.</p>

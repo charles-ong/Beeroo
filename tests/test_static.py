@@ -104,6 +104,11 @@ def make_cases():
     ]
     for e in extra:
         cases.append({"sort": "value", "member": True, "q": "", "min_retailers": 1, **e})
+    for e in ({"retailers": ["bws"]}, {"retailers": ["liquorland"]}, {"retailers": ["bws", "liquorland"]}, {"retailers": ["dan_murphys"]},
+              {"retailers": ["bws"], "sort": "unit_price"}, {"retailers": ["liquorland"], "member": False},
+              {"retailers": ["bws"], "min_units": 24, "max_units": 30}, {"retailers": ["liquorland"], "types": ["Lager"]}):
+        cases.append({"sort": "value", "member": True, "q": "", "min_retailers": 1, "best_only": True, **e})
+    cases.append({"sort": "value", "member": True, "q": "", "min_retailers": 1, "best_only": True})   # no retailer picked: no effect
     for sort in ("value", "unit_price", "abv", "rating", "name"):                   # and every sort the other way round
         cases.append({"sort": sort, "member": True, "q": "", "min_retailers": 1, "reverse": True})
         cases.append({"sort": sort, "member": False, "q": "", "min_retailers": 2, "reverse": True, "min_abv": 4.0})
@@ -114,7 +119,7 @@ def query_of(c):
     return {"q": c["q"], "sort": c["sort"], "min_retailers": c["min_retailers"], "include_member": c["member"],
             "retailers": c.get("retailers"), "types": c.get("types"), "min_units": c.get("min_units"),
             "max_units": c.get("max_units"), "min_abv": c.get("min_abv"), "max_abv": c.get("max_abv"),
-            "reverse": c.get("reverse", False)}
+            "reverse": c.get("reverse", False), "best_only": c.get("best_only", False)}
 
 
 def digest(products):
@@ -138,7 +143,7 @@ def test_browser_side_filtering_and_sorting_matches_the_server(site):
             r = queries.compare(site["conn"], state, q=query["q"], sort=query["sort"], include_member=query["include_member"],
                                 retailers=query["retailers"], types=query["types"], min_units=query["min_units"],
                                 max_units=query["max_units"], min_abv=query["min_abv"], max_abv=query["max_abv"],
-                                min_retailers=query["min_retailers"], reverse=query["reverse"], limit=1000)
+                                min_retailers=query["min_retailers"], reverse=query["reverse"], best_only=query["best_only"], limit=1000)
             expected[name] = (r["meta"]["total"], [p["id"] for p in r["products"]], digest(r["products"]))
 
     cases_file = site["out"].parent / "cases.json"
@@ -150,7 +155,7 @@ def test_browser_side_filtering_and_sorting_matches_the_server(site):
     mismatches = [n for n in expected if got[n] != json.loads(json.dumps(expected[n]))]
     assert not mismatches, mismatches[:5]
     assert any(t for t, *_ in expected.values())          # not vacuous
-    assert len({tuple(ids) for _, ids, _ in expected.values()}) > 35   # the filters and sorting really vary the answers
+    assert len({tuple(ids) for _, ids, _ in expected.values()}) > 40   # the filters and sorting really vary the answers
 
 
 def test_exported_payload_carries_the_facets_the_dropdowns_use(site):
@@ -323,6 +328,23 @@ def test_new_filters_work_in_a_real_browser(site):
             labels = page.eval_on_selector_all(".cell:not(.empty)", "els => els.map(e => e.children[2].textContent)")
             assert labels and all("Case of 24" in t for t in labels), labels[:3]
 
+            # "best price" checkbox: needs a picked retailer, then keeps only beers a picked retailer wins
+            page.select_option("#min_units", "")                          # (clear the 24-only range from above first)
+            page.select_option("#max_units", "")
+            wait_count(f"n === {all_count}")
+            assert page.is_disabled("#best_only")
+            page.locator(".chip").nth(1).click()                          # BWS
+            wait_count(f"n < {all_count}")
+            with_bws = count()
+            assert not page.is_disabled("#best_only")
+            page.check("#best_only")
+            wait_count(f"n < {with_bws}")
+            winning = count()
+            assert 0 < winning < with_bws
+            page.locator(".chip").nth(1).click()                          # no retailer picked again
+            assert page.is_disabled("#best_only") and not page.is_checked("#best_only")
+            wait_count(f"n === {all_count}")
+
             # reverse order flips the list (and "Clear filters" puts it back)
             first = page.locator(".card h2").first.inner_text()
             page.select_option("#sort", "name")
@@ -451,12 +473,14 @@ def test_prices_from_line_names_the_actual_stores(site, tmp_path):
             page.select_option("#state", "ACT")
             page.wait_for_selector(".card")
             line = page.inner_text("#stores")
-            assert line == ("Prices from — Dan Murphy's: Canberra Airport, Majura (ACT) · BWS: Kingston (ACT) · "
+            assert line == ("Prices from - Dan Murphy's: Canberra Airport, Majura (ACT) · BWS: Kingston (ACT) · "
                             "Liquorland: Woden (ACT, state-wide prices)")
             # a state-level placeholder (no store known yet) is described as what it is
             stores["liquorland"]["store_name"] = "Liquorland ACT (state pricing)"
             path.write_text(json.dumps(payload))
-            page.reload()
+            page = browser.new_context().new_page()                       # a fresh browser: no cached copy of the old file
+            page.goto(f"http://127.0.0.1:{srv.server_port}/")
+            page.wait_for_function("document.querySelectorAll('#state option').length === 9")
             page.select_option("#state", "ACT")
             page.wait_for_selector(".card")
             assert "Liquorland: state-wide pricing (ACT)" in page.inner_text("#stores")
@@ -464,3 +488,13 @@ def test_prices_from_line_names_the_actual_stores(site, tmp_path):
             browser.close()
     finally:
         srv.shutdown()
+
+
+def test_the_price_promises_note_is_in_the_footer_not_the_page_body(site):
+    html = (site["out"] / "index.html").read_text()
+    start = html.index('<details id="promises">')
+    note = html[start:html.index("</details>", start)]
+    assert "Lowest Liquor Price Guarantee" in note and "they'll beat it" in note
+    assert "Price Match Promise" in note and "identical stocked item at a competitor in the same state" in note
+    assert "check their terms" in note
+    assert start > html.index('<footer')                 # tucked away with the other small print
