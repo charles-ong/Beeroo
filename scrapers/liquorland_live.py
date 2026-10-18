@@ -18,6 +18,7 @@ import asyncio
 import logging
 import random
 import re
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from common.records import utcnow
@@ -108,13 +109,19 @@ async def select_state(page, collector, postcode):
     await page.wait_for_timeout(2500)
 
     suggestion = page.locator("button.search-results-item").filter(has_text=re.compile(rf"\b{re.escape(postcode)}\b")).first
+    shown = None
     try:
-        await suggestion.click(timeout=10000)
+        await suggestion.click(timeout=6000)
     except Exception:
+        # Since mid-October the box can show no suggestion list for a postcode; "Save location" then takes the typed
+        # postcode as it is. Try that, and report what was visible if it doesn't work either.
         shown = [t.strip()[:40] for t in await page.locator("button.search-results-item").locator("visible=true").all_inner_texts()][:6]
-        raise LookupError(f"no Liquorland location found for {postcode} (suggestions shown: {shown or 'none'})")
+        log.warning("no suggestion for %s (visible: %s); saving the typed postcode", postcode, shown or "none")
     await page.wait_for_timeout(1000)
-    await page.get_by_role("button", name=re.compile(r"save location", re.I)).locator("visible=true").first.click(timeout=15000)
+    try:
+        await page.get_by_role("button", name=re.compile(r"save location", re.I)).locator("visible=true").first.click(timeout=15000)
+    except Exception:
+        raise LookupError(f"no Liquorland location found for {postcode} (suggestions shown: {shown or 'none'})")
     await page.wait_for_timeout(3000)
 
     # "Set shopping method" drawer: Click & Collect is preselected and lists stores
@@ -175,6 +182,10 @@ async def scrape(page, postcode, max_pages=MAX_PAGES, raw_pages=None, expected_s
         store_name = await select_state(page, collector, postcode)
     except Exception:
         await page.screenshot(path="data/liquorland_location_debug.png")
+        try:      # the page's own markup, so a changed location box can be seen without a live visit
+            Path("data/liquorland_location_debug.html").write_text((await page.content())[:400_000], encoding="utf-8")
+        except Exception:
+            pass
         await raise_if_blocked(page)     # a bot-protection page mid-way is a block, not a lookup failure
         raise
 
