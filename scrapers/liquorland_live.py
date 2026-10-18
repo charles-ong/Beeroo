@@ -111,7 +111,8 @@ async def select_state(page, collector, postcode):
     try:
         await suggestion.click(timeout=10000)
     except Exception:
-        raise LookupError(f"no Liquorland location found for {postcode}")
+        shown = [t.strip()[:40] for t in await page.locator("button.search-results-item").locator("visible=true").all_inner_texts()][:6]
+        raise LookupError(f"no Liquorland location found for {postcode} (suggestions shown: {shown or 'none'})")
     await page.wait_for_timeout(1000)
     await page.get_by_role("button", name=re.compile(r"save location", re.I)).locator("visible=true").first.click(timeout=15000)
     await page.wait_for_timeout(3000)

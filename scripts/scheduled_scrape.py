@@ -49,6 +49,7 @@ KINDS = {"bws": "bws_products", "liquorland": "liquorland_products", "dan_murphy
 MIN_COMPLETE = 0.8       # share of the site's reported total we must account for
 FAILED_DIR = ROOT / "data" / "failed"
 MAX_CONSECUTIVE_FAILURES = 3   # errors in a row before a retailer is dropped for the day
+FAILED_ZONE_COOLDOWN = timedelta(hours=20)   # a state whose last attempt failed waits this long before it is tried first again
 MIN_SPACING_S = 180      # minimum average gap between sessions on the SAME site
 MAX_BACKOFF_DAYS = 14
 ROBOTS_BACKOFF_DAYS = 7
@@ -102,15 +103,32 @@ def retailer_state(state, name):
     return state.setdefault("retailers", {}).setdefault(name, _blank())
 
 
-def pick_zones(rstate, zones=ZONES, n=1):
-    """Never-scraped zones first (in order), then the least recently successful."""
+def pick_zones(rstate, zones=ZONES, n=1, now=None):
+    """Never-scraped zones first (in order), then the least recently successful. A zone whose latest attempt
+    failed less than FAILED_ZONE_COOLDOWN ago goes to the back, so one state that keeps failing can't take every
+    run and starve the rest; it is tried first again once the cooldown has passed."""
+    now = now or datetime.now(timezone.utc)
+
     def last(z):
         return rstate["zones"].get(z, {}).get("last_success") or ""
-    return sorted(zones, key=lambda z: (last(z), zones.index(z)))[:n]
+
+    def cooling(z):
+        attempt = rstate["zones"].get(z, {}).get("last_attempt") or ""
+        if not attempt or attempt <= last(z):
+            return 0                                   # never tried, or the last attempt worked
+        try:
+            when = datetime.fromisoformat(attempt)
+        except ValueError:
+            return 0
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return 1 if now - when < FAILED_ZONE_COOLDOWN else 0
+
+    return sorted(zones, key=lambda z: (cooling(z), last(z), zones.index(z)))[:n]
 
 
-def pick_zone(rstate, zones=ZONES):
-    return pick_zones(rstate, zones, 1)[0]
+def pick_zone(rstate, zones=ZONES, now=None):
+    return pick_zones(rstate, zones, 1, now)[0]
 
 
 def backing_off(rstate, now):
@@ -318,7 +336,7 @@ def run(*, state_path, scrapes, push, now=None, retailers=None, zones_per_run=le
             continue
         # a retailer with no stores in a state (Dan Murphy's in the NT) is never visited there
         usable = [z for z in zones if has_stores(name, z)]
-        plan[name] = ([zone] if has_stores(name, zone) else []) if zone else pick_zones(rstate, usable, zones_per_run)
+        plan[name] = ([zone] if has_stores(name, zone) else []) if zone else pick_zones(rstate, usable, zones_per_run, now)
 
     stopped, last_end, started = set(), {}, False
     failures = {}      # consecutive error/push_failed results per retailer

@@ -134,6 +134,20 @@ def test_zone_rotation_starts_in_order_then_least_recent():
     assert ss.pick_zone(r) == "NSW"                  # oldest success first
 
 
+def test_a_state_that_keeps_failing_does_not_starve_the_others():
+    now = datetime(2026, 10, 18, 12, tzinfo=timezone.utc)
+    r = ss._blank()
+    r["zones"] = {z: {"last_success": f"2026-10-0{i + 1}"} for i, z in enumerate(ss.ZONES)}
+    oldest = ss.pick_zone(r, now=now)
+    r["zones"][oldest].update(last_attempt=(now - timedelta(hours=5)).isoformat(), last_error="x")
+    assert ss.pick_zone(r, now=now) != oldest                      # recently failed: someone else's turn
+    assert oldest not in ss.pick_zones(r, n=len(ss.ZONES) - 1, now=now)
+    later = now + timedelta(hours=16)                              # 21 hours after the failure
+    assert ss.pick_zone(r, now=later) == oldest                    # cooldown over: first again
+    r["zones"][oldest]["last_success"] = (now - timedelta(hours=1)).isoformat()
+    assert ss.pick_zone(r, now=now) != oldest                      # it worked after all: ordinary rotation
+
+
 def test_failed_attempts_do_not_count_as_fresh():
     r = ss._blank()
     r["zones"]["NSW"] = {"last_attempt": "2026-10-01", "last_error": "x"}
