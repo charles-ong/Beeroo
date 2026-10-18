@@ -21,6 +21,7 @@ your computer, once a day:
 - `.github/workflows/daily-scrape.yml`: the daily cloud job (BWS + Liquorland on a free GitHub runner, then deploy); your Mac scrapes Dan Murphy's only. [docs/CLOUD_SCRAPE.md](docs/CLOUD_SCRAPE.md)
 - `.github/workflows/cloud-scrape-experiment.yml`: a one-click test of whether a free GitHub runner can scrape a site. [docs/SCHEDULED_SCRAPE.md](docs/SCHEDULED_SCRAPE.md#can-the-scraping-move-to-the-cloud-experiment)
 - Price alerts (email when a price drops), sponsored placement and legal pages: [docs/ALERTS.md](docs/ALERTS.md), `functions/`, `scripts/send_alerts.py`, `app/static/sponsored.json`.
+- Liquorland by hand (its bot protection blocks automation; the cloud scrape of it is paused): [docs/LIQUORLAND_MANUAL.md](docs/LIQUORLAND_MANUAL.md), `scripts/import_ll_har.py`.
 - `scripts/check_freshness.py`: which state/retailer combinations are stale.
 - `app/`: the API + frontend (also used locally, or for the optional paid server in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)).
 - [docs/ACCESS_NOTES.md](docs/ACCESS_NOTES.md): what each retailer's site does, what's been verified live, and the data quirks found.

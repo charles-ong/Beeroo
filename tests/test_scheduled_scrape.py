@@ -621,3 +621,10 @@ def test_asking_for_dan_murphys_in_the_nt_does_nothing_and_other_retailers_still
     scrapes = {n: fake(n, calls=calls) for n in ALL}
     _, results, _ = go(state, scrapes, zone="NT")
     assert sorted(c[0] for c in calls) == ["bws", "liquorland"] and {r["retailer"] for r in results} == {"bws", "liquorland"}
+
+
+def test_an_empty_retailer_list_scrapes_nothing_rather_than_everything(tmp_path):
+    """BEEROO_SKIP_RETAILERS=liquorland with --retailer liquorland leaves an empty list; that once meant "all three"."""
+    calls = []
+    code, results, _ = go(tmp_path / "s.json", {n: fake(n, calls=calls) for n in ALL}, retailers=[])
+    assert code == 0 and results == [] and calls == []

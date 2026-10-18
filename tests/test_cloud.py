@@ -266,3 +266,8 @@ def test_neither_host_exports_but_says_so(daily):
 def test_a_failed_deploy_fails_the_daily_job(daily):
     repo, log = daily
     assert run_daily(repo, BEEROO_CF_PROJECT="beeroo", FAKE_FAIL_DEPLOY="1").returncode == 1
+
+
+def test_a_retailer_skipped_on_purpose_is_reported_as_skipped_not_crashed():
+    md, verdict = ci_summary.summarise('{"results": []}\n', "0", "Scrape: liquorland")
+    assert verdict == "skipped" and "crashed" not in md and "paused" in md

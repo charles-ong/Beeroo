@@ -324,7 +324,7 @@ def run(*, state_path, scrapes, push, now=None, retailers=None, zones_per_run=le
     `min_spacing` is enforced on top for any site visited back to back."""
     now = now or datetime.now(timezone.utc)
     state = load_state(state_path)
-    names = [n for n in (retailers or RETAILERS) if n in scrapes]
+    names = [n for n in (RETAILERS if retailers is None else retailers) if n in scrapes]   # [] means none, not all
     results, plan = [], {}
 
     for name in names:

@@ -30,6 +30,14 @@ Your Mac's nightly job (`scripts/install_launchd.sh`) is **not needed any more**
 was blocked from it anyway. `scripts/daily_run.sh` still works if you ever want the Mac to scrape something
 (`BEEROO_DATA_REMOTE` hands its pages to the cloud inbox).
 
+## Liquorland is paused (18 Oct 2026)
+
+Liquorland's bot protection rejects our automation from GitHub's servers (an Imperva block page) and from a home Mac (its
+location box stops offering suggestions). We don't try to get past it. The Daily cloud scrape skips Liquorland until
+**25 October 2026 (UTC)**: the date is in the Scrape step of `.github/workflows/daily-scrape.yml` (change it to extend, delete
+the block to resume), and the Liquorland leg then does nothing. Meanwhile add its prices by hand:
+[LIQUORLAND_MANUAL.md](LIQUORLAND_MANUAL.md). The real fix is a data feed from Coles.
+
 ## One-time setup
 
 1. **Push the repo to GitHub** (`origin` is already `charles-ong/Beeroo`). The workflow lives in

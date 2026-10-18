@@ -23,6 +23,8 @@
 #   BEEROO_CHROMIUM_PATH=/path/to/chromium      (optional)
 #   BEEROO_ZONES_PER_RUN=8                       (1-8 states per retailer per day; default 8 = all)
 #   BEEROO_SKIP_RETAILERS=liquorland             (comma list of sites to leave out)
+#   BEEROO_LOCAL_RETAILERS="liquorland"          (mode A: which sites this machine scrapes; default dan_murphys)
+#   BEEROO_LIQUORLAND_ZONES_PER_RUN=3            (mode A: Liquorland states per run, oldest first; default 3)
 set -u
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="${BEEROO_ENV_FILE:-$HOME/.config/beeroo/env}"
@@ -40,12 +42,21 @@ PY="$REPO/.venv/bin/python"
 cd "$REPO"
 
 if [ -n "${BEEROO_DATA_REMOTE:-}" ]; then
-  OUT="$REPO/data/outbox"
-  "$PY" scripts/scheduled_scrape.py --retailer "${BEEROO_LOCAL_RETAILER:-dan_murphys}" --emit-dir "$OUT" \
-    --jitter "${BEEROO_JITTER:-900}" --zones-per-run "${BEEROO_ZONES_PER_RUN:-8}" "$@"
-  SCRAPE_CODE=$?
-  "$PY" scripts/data_branch.py push-inbox --from "$OUT" --retailer dan_murphys || exit 1
-  exit "$SCRAPE_CODE"
+  # one retailer after another, each with its own outbox and inbox folder on the data branch
+  CODE=0
+  for R in ${BEEROO_LOCAL_RETAILERS:-${BEEROO_LOCAL_RETAILER:-dan_murphys}}; do
+    OUT="$REPO/data/outbox/$R"
+    case "$R" in
+      liquorland) ZONES="${BEEROO_LIQUORLAND_ZONES_PER_RUN:-3}"; SPACING=600 ;;   # a few states a day, spaced out
+      *) ZONES="${BEEROO_ZONES_PER_RUN:-8}"; SPACING=180 ;;
+    esac
+    "$PY" scripts/scheduled_scrape.py --retailer "$R" --emit-dir "$OUT" \
+      --jitter "${BEEROO_JITTER:-900}" --zones-per-run "$ZONES" --min-spacing "$SPACING" "$@"
+    C=$?
+    "$PY" scripts/data_branch.py push-inbox --from "$OUT" --retailer "$R" || exit 1
+    [ "$C" -eq 0 ] || CODE="$C"
+  done
+  exit "$CODE"
 fi
 
 # 1. scrape (exit 3 = blocked, 1 = error; we still export what we have)

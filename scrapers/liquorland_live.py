@@ -109,19 +109,15 @@ async def select_state(page, collector, postcode):
     await page.wait_for_timeout(2500)
 
     suggestion = page.locator("button.search-results-item").filter(has_text=re.compile(rf"\b{re.escape(postcode)}\b")).first
-    shown = None
     try:
-        await suggestion.click(timeout=6000)
+        await suggestion.click(timeout=10000)
     except Exception:
-        # Since mid-October the box can show no suggestion list for a postcode; "Save location" then takes the typed
-        # postcode as it is. Try that, and report what was visible if it doesn't work either.
+        # Liquorland's box only fills its suggestion list for a real visitor; when it stays empty we stop (the site
+        # rejects a typed postcode that wasn't picked from the list) and say what was visible.
         shown = [t.strip()[:40] for t in await page.locator("button.search-results-item").locator("visible=true").all_inner_texts()][:6]
-        log.warning("no suggestion for %s (visible: %s); saving the typed postcode", postcode, shown or "none")
-    await page.wait_for_timeout(1000)
-    try:
-        await page.get_by_role("button", name=re.compile(r"save location", re.I)).locator("visible=true").first.click(timeout=15000)
-    except Exception:
         raise LookupError(f"no Liquorland location found for {postcode} (suggestions shown: {shown or 'none'})")
+    await page.wait_for_timeout(1000)
+    await page.get_by_role("button", name=re.compile(r"save location", re.I)).locator("visible=true").first.click(timeout=15000)
     await page.wait_for_timeout(3000)
 
     # "Set shopping method" drawer: Click & Collect is preselected and lists stores

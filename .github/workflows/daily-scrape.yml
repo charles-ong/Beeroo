@@ -120,6 +120,13 @@ jobs:
           set +e
           EXTRA=""
           case "$CLEAR_BACKOFF" in all|"$RETAILER") EXTRA="--clear-backoff $RETAILER" ;; esac
+          # Liquorland paused until 25 Oct 2026 (UTC): its bot protection now rejects our automation, so we
+          # make no visits meanwhile (it still gets a runner for a minute, then does nothing). To resume early,
+          # delete this block; to extend, change the date.
+          if [ "$RETAILER" = liquorland ] && [ "$(date -u +%F)" \< "2026-10-25" ]; then
+            export BEEROO_SKIP_RETAILERS=liquorland
+            echo "Liquorland is paused until 2026-10-25: nothing will be scraped" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
           # --min-spacing: on average at least 10 minutes between visits to the same site
           xvfb-run -a --server-args="-screen 0 1440x900x24" \
             python scripts/scheduled_scrape.py $EXTRA --retailer "$RETAILER" --zones-per-run "$ZONES" \

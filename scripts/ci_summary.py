@@ -37,6 +37,11 @@ def summarise(result_text, exit_code, title="Cloud scrape experiment"):
     data = parse_result(result_text)
     lines = [f"## {title}", ""]
 
+    if data is not None and data.get("results") == [] and str(exit_code) == "0":   # an empty result and a clean exit: skipped on purpose
+        lines += ["**Verdict: skipped.** Nothing was scraped: this retailer is paused or switched off "
+                  "(see the pause note in the workflow, or `BEEROO_SKIP_RETAILERS`).", f"Exit code: `{exit_code}`."]
+        return "\n".join(lines) + "\n", "skipped"
+
     if not data or not data.get("results"):
         lines += ["**Verdict: no result.** The scraper printed no result line, so it probably crashed before finishing.",
                   f"Exit code: `{exit_code}`. See the uploaded `scrape.log`."]

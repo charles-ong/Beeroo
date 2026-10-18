@@ -251,6 +251,25 @@ def test_daily_run_still_exports_after_a_block_and_reports_it(daily_repo):
     assert "export_static.py" in calls and "publish site" in calls   # but yesterday's data is still published
 
 
+def test_daily_run_hands_each_local_retailer_to_its_own_inbox(daily_repo):
+    repo, log = daily_repo
+    r = run_daily(repo, {"BEEROO_DATA_REMOTE": "https://example/x.git", "BEEROO_LOCAL_RETAILERS": "dan_murphys liquorland",
+                         "BEEROO_LIQUORLAND_ZONES_PER_RUN": "2"})
+    assert r.returncode == 0, r.stderr
+    calls = [c for c in log.read_text().splitlines() if c.startswith("py")]
+    assert [c.split()[1].split("/")[-1] for c in calls] == ["scheduled_scrape.py", "data_branch.py", "scheduled_scrape.py", "data_branch.py"]
+    assert "--retailer dan_murphys" in calls[0] and "--zones-per-run 8" in calls[0]
+    assert "--retailer liquorland" in calls[2] and "--zones-per-run 2" in calls[2] and "--min-spacing 600" in calls[2]
+    assert "--from" in calls[3] and calls[3].endswith("--retailer liquorland") and "outbox/liquorland" in calls[3]
+
+
+def test_daily_run_local_mode_defaults_to_dan_murphys_and_still_pushes_after_a_block(daily_repo):
+    repo, log = daily_repo
+    r = run_daily(repo, {"BEEROO_DATA_REMOTE": "https://example/x.git", "FAKE_SCRAPE_CODE": "3"})
+    calls = [c for c in log.read_text().splitlines() if c.startswith("py")]
+    assert r.returncode == 3 and len(calls) == 2 and "--retailer dan_murphys" in calls[0] and calls[1].endswith("--retailer dan_murphys")
+
+
 def test_daily_run_refuses_a_world_readable_env_file(daily_repo):
     repo, _ = daily_repo
     env_file = repo / "env"
