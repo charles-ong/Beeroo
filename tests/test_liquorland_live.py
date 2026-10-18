@@ -166,3 +166,29 @@ def test_the_bot_wall_that_stopped_the_cloud_run_is_recognised_by_its_text():
     with pytest.raises(Blocked):
         run(raise_if_blocked(wall))
     run(raise_if_blocked(BodyPage("Beer, cider and more", title="Beer | Liquorland")))
+
+
+class HtmlPage(FakePage):
+    def __init__(self, html, **kw):
+        super().__init__(**kw)
+        self._html = html
+
+    async def content(self):
+        return self._html
+
+    async def inner_text(self, selector):
+        return ""            # the real block page's text lives in an iframe, so the body is empty
+
+
+def test_the_incapsula_block_page_with_an_empty_title_is_a_block():
+    # what a GitHub runner got from Liquorland on 18 Oct 2026 (saved by the location-failure debug dump)
+    wall = HtmlPage('<html><body><iframe id="main-iframe" src="/_Incapsula_Resource?CWUDNSAI=23">'
+                    'Request unsuccessful. Incapsula incident ID: 363000400802231386-851882586814482991</iframe></body></html>',
+                    title="", url="https://www.liquorland.com.au/beer-and-cider/beer")
+    with pytest.raises(Blocked):
+        run(raise_if_blocked(wall))
+
+
+def test_the_normal_page_carries_an_incapsula_script_but_is_not_a_block():
+    page = HtmlPage('<script src="/_Incapsula_Resource?SWJIYLWA=719d34d3&ns=1" async></script><div id="root"></div>')
+    run(raise_if_blocked(page))

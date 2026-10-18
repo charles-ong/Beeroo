@@ -98,6 +98,15 @@ async def raise_if_blocked(page, response=None):
         raise Blocked(f"bot protection page served (title={title!r})")
 
     try:
+        # Imperva/Incapsula's block page puts its message inside an iframe: no title, nothing in the body text
+        if "incapsula incident id" in (await page.content()).lower():
+            raise Blocked(f"bot protection page served (Incapsula block, title={title!r})")
+    except Blocked:
+        raise
+    except Exception:  # noqa: BLE001 - mid-navigation, or a page object without content()
+        pass
+
+    try:
         text = (await page.inner_text("body"))[:3000].lower()
     except Exception:  # noqa: BLE001 - page may be mid-navigation; the title/url checks above still ran
         return
