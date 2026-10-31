@@ -1,0 +1,164 @@
+{
+  "retailers": {
+    "bws": {
+      "blocked": {
+        "backoff_until": null,
+        "consecutive": 0
+      },
+      "zones": {
+        "ACT": {
+          "complete": true,
+          "expected": 745,
+          "last_attempt": "2026-10-01T13:01:40.300791+00:00",
+          "last_error": null,
+          "last_success": "2026-10-01T13:01:40.300791+00:00",
+          "products": 217,
+          "store": "bws:1582"
+        },
+        "NSW": {
+          "complete": true,
+          "expected": 745,
+          "last_attempt": "2026-10-01T13:01:40.300791+00:00",
+          "last_error": null,
+          "last_success": "2026-10-01T13:01:40.300791+00:00",
+          "products": 189,
+          "store": "bws:6885"
+        },
+        "NT": {
+          "complete": true,
+          "expected": 292,
+          "last_attempt": "2026-10-01T13:01:40.300791+00:00",
+          "last_error": null,
+          "last_success": "2026-10-01T13:01:40.300791+00:00",
+          "products": 168,
+          "store": "bws:5053"
+        },
+        "QLD": {
+          "complete": true,
+          "expected": 572,
+          "last_attempt": "2026-10-01T13:01:40.300791+00:00",
+          "last_error": null,
+          "last_success": "2026-10-01T13:01:40.300791+00:00",
+          "products": 210,
+          "store": "bws:2167"
+        },
+        "SA": {
+          "complete": true,
+          "expected": 388,
+          "last_attempt": "2026-10-01T13:01:40.300791+00:00",
+          "last_error": null,
+          "last_success": "2026-10-01T13:01:40.300791+00:00",
+          "products": 195,
+          "store": "bws:5039"
+        },
+        "TAS": {
+          "complete": true,
+          "expected": 349,
+          "last_attempt": "2026-10-01T13:01:40.300791+00:00",
+          "last_error": null,
+          "last_success": "2026-10-01T13:01:40.300791+00:00",
+          "products": 223,
+          "store": "bws:7150"
+        },
+        "VIC": {
+          "complete": true,
+          "expected": 388,
+          "last_attempt": "2026-10-01T13:01:40.300791+00:00",
+          "last_error": null,
+          "last_success": "2026-10-01T13:01:40.300791+00:00",
+          "products": 192,
+          "store": "bws:7699"
+        },
+        "WA": {
+          "complete": true,
+          "expected": 463,
+          "last_attempt": "2026-10-01T13:01:40.300791+00:00",
+          "last_error": null,
+          "last_success": "2026-10-01T13:01:40.300791+00:00",
+          "products": 168,
+          "store": "bws:4261"
+        }
+      }
+    },
+    "liquorland": {
+      "blocked": {
+        "backoff_until": "2026-11-03T13:40:45.830431+00:00",
+        "consecutive": 2
+      },
+      "zones": {
+        "ACT": {
+          "complete": true,
+          "expected": 817,
+          "last_attempt": "2026-10-18T04:42:22.050219+00:00",
+          "last_error": "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for get_by_text(\"Set shopping method\").filter(visible=True).first\n",
+          "last_success": "2026-10-11T13:35:59.367594+00:00",
+          "products": 817,
+          "store": "liquorland:ll_act"
+        },
+        "NSW": {
+          "complete": true,
+          "expected": 988,
+          "last_attempt": "2026-10-27T22:41:53.473240+00:00",
+          "last_error": "LookupError: no Liquorland location found for 2100 (suggestions shown: none)",
+          "last_success": "2026-10-11T06:48:07.599280+00:00",
+          "products": 988,
+          "store": "liquorland:ll_nsw"
+        },
+        "NT": {
+          "complete": true,
+          "expected": 678,
+          "last_attempt": "2026-10-27T18:30:57.511619+00:00",
+          "last_error": "LookupError: no Liquorland location found for 0800 (suggestions shown: none)",
+          "last_success": "2026-10-10T22:04:08.438093+00:00",
+          "products": 678,
+          "store": "liquorland:ll_nt"
+        },
+        "QLD": {
+          "complete": true,
+          "expected": 918,
+          "last_attempt": "2026-10-18T05:25:21.542381+00:00",
+          "last_error": "TimeoutError: Locator.wait_for: Timeout 15000ms exceeded.\nCall log:\n  - waiting for locator(\"div.StoreItem\").filter(visible=True).first to be visible\n",
+          "last_success": "2026-10-11T22:33:13.602178+00:00",
+          "products": 918,
+          "store": "liquorland:ll_qld"
+        },
+        "SA": {
+          "complete": true,
+          "expected": 798,
+          "last_attempt": "2026-10-12T06:57:58.805320+00:00",
+          "last_error": null,
+          "last_success": "2026-10-12T06:57:58.805320+00:00",
+          "products": 798,
+          "store": "liquorland:ll_sa"
+        },
+        "TAS": {
+          "complete": true,
+          "expected": 1031,
+          "last_attempt": "2026-10-28T13:37:12.129405+00:00",
+          "last_error": "blocked: bot protection page served (Incapsula block, title='')",
+          "last_success": "2026-10-10T17:34:24.951447+00:00",
+          "products": 1031,
+          "store": "liquorland:ll_tas"
+        },
+        "VIC": {
+          "complete": true,
+          "expected": 1082,
+          "last_attempt": "2026-10-18T04:42:22.050219+00:00",
+          "last_error": "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for get_by_text(\"Set shopping method\").filter(visible=True).first\n",
+          "last_success": "2026-10-11T17:52:07.548858+00:00",
+          "products": 1082,
+          "store": "liquorland:ll_vic"
+        },
+        "WA": {
+          "complete": true,
+          "expected": 878,
+          "last_attempt": "2026-10-30T13:40:45.830431+00:00",
+          "last_error": "blocked: bot protection page served (Incapsula block, title='')",
+          "last_success": "2026-10-10T13:07:01.626158+00:00",
+          "products": 878,
+          "store": "liquorland:ll_wa"
+        }
+      }
+    }
+  }
+}
