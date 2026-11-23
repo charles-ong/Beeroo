@@ -79,7 +79,7 @@ def copy_site(out_dir):
     out = Path(out_dir)
     static = ROOT / "app" / "static"
     (out / "static").mkdir(parents=True, exist_ok=True)
-    for name in ("style.css", "app.js", "staticdata.js"):
+    for name in ("style.css", "app.js", "staticdata.js", "favicon.svg"):
         shutil.copy(static / name, out / "static" / name)
     # content files served from the site root (terms.html and privacy.html link to static/style.css)
     for name in ("sponsored.json", "terms.html", "privacy.html"):
