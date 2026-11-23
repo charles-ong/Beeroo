@@ -17,8 +17,6 @@
 # 01:00, 07:00, 13:00 = 1 Liquorland state each. Liquorland's bot protection tolerates only a couple of visits
 # a day from GitHub's addresses, so it gets one slow session per run, oldest state first
 # (about 5 per day, all 8 states in under two days). Edit the cron lines to change that.
-# With the APIFY_TOKEN secret set, Liquorland is fetched through a paid Apify actor instead of our browser
-# (scrapers/liquorland_apify.py, docs/ACCESS_NOTES.md); each Liquorland state then costs Apify credit.
 # Liquorland's robots.txt disallows the /api/ path its pages load data from
 # (docs/SCHEDULED_SCRAPE.md); delete a retailer's line from the plan step to leave it out.
 # Free-minute allowances and policies change; check GitHub's current terms.
@@ -118,13 +116,17 @@ jobs:
           RETAILER: ${{ matrix.retailer }}
           ZONES: ${{ matrix.zones }}
           CLEAR_BACKOFF: ${{ inputs.clear_backoff || 'none' }}
-          # Liquorland only: fetch it through the paid Apify actor (scrapers/liquorland_apify.py) instead of
-          # our own browser, which its bot protection rejects. Unset or empty = use the browser.
-          APIFY_TOKEN: ${{ matrix.retailer == 'liquorland' && secrets.APIFY_TOKEN || '' }}
         run: |
           set +e
           EXTRA=""
           case "$CLEAR_BACKOFF" in all|"$RETAILER") EXTRA="--clear-backoff $RETAILER" ;; esac
+          # Liquorland paused until 25 Oct 2026 (UTC): its bot protection now rejects our automation, so we
+          # make no visits meanwhile (it still gets a runner for a minute, then does nothing). To resume early,
+          # delete this block; to extend, change the date.
+          if [ "$RETAILER" = liquorland ] && [ "$(date -u +%F)" \< "2026-10-25" ]; then
+            export BEEROO_SKIP_RETAILERS=liquorland
+            echo "Liquorland is paused until 2026-10-25: nothing will be scraped" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
           # --min-spacing: on average at least 10 minutes between visits to the same site
           xvfb-run -a --server-args="-screen 0 1440x900x24" \
             python scripts/scheduled_scrape.py $EXTRA --retailer "$RETAILER" --zones-per-run "$ZONES" \

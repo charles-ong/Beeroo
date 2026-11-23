@@ -140,13 +140,7 @@ def test_secrets_only_reach_the_steps_that_need_them_and_never_the_shell_text(wf
                 holders.add(step["name"])
     assert holders == {"Restore back-off state from the data branch", "Restore the database from the data branch",
                        "Save the database to the data branch", "Deploy to Cloudflare Pages",
-                       "Send price-alert emails",
-                       "Scrape (headed, on a virtual display; pages are saved, not ingested)"}   # APIFY_TOKEN
-
-
-def test_apify_token_reaches_only_the_liquorland_scrape(wf):
-    env = find(steps_of(wf, "scrape"), "Scrape (headed")["env"]
-    assert env["APIFY_TOKEN"] == "${{ matrix.retailer == 'liquorland' && secrets.APIFY_TOKEN || '' }}"
+                       "Send price-alert emails"}
 
 
 def test_dan_murphys_runs_once_a_day_in_the_cloud_in_the_evening_slot_only(wf, tmp_path):

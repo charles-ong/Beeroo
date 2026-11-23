@@ -11,8 +11,6 @@ day. Retailers back off independently.
 
 Liquorland note: its robots.txt disallows the /api/ path its pages load data
 from. It is included at your request; skip it with BEEROO_SKIP_RETAILERS=liquorland.
-With APIFY_TOKEN set, Liquorland is fetched through a paid third-party Apify actor
-that does get past its bot protection (scrapers/liquorland_apify.py), not our browser.
 
     python scripts/scheduled_scrape.py                           # all retailers, all states
     python scripts/scheduled_scrape.py --retailer bws --zone NSW  # one state, one site
@@ -447,16 +445,11 @@ def browser_scrape(driver_scrape, browser_path=None):
     return scrape
 
 
-def real_scrapes(browser_path=None, environ=os.environ):
-    """With APIFY_TOKEN set, Liquorland comes from the third-party Apify actor (scrapers/liquorland_apify.py)
-    instead of our own browser; the other retailers are unchanged."""
-    from scrapers import bws_live, dan_murphys, liquorland_apify, liquorland_live
-    token = liquorland_apify.token_from_env(environ)
-    if token:
-        log.info("liquorland: using the Apify actor (APIFY_TOKEN is set)")
+def real_scrapes(browser_path=None):
+    from scrapers import bws_live, dan_murphys, liquorland_live
     return {
         "bws": browser_scrape(bws_live.scrape, browser_path),
-        "liquorland": liquorland_apify.make_scrape(token) if token else browser_scrape(liquorland_live.scrape, browser_path),
+        "liquorland": browser_scrape(liquorland_live.scrape, browser_path),
         "dan_murphys": browser_scrape(dan_murphys.scrape, browser_path),
     }
 
