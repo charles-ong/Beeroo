@@ -8,8 +8,6 @@
 
 Terms of Use for all three are **not yet reviewed** (Liquorland's is at `/termsconditions`, behind the CAPTCHA). Review manually in a normal browser.
 
-Ground rules: no CAPTCHA solving, no stealth/proxy/fingerprint evasion, low request rates, honour robots.txt, attribute and link every price to its source page. If blocked, stop and report.
-
 ## Dan Murphy's findings (2026-10-01)
 
 - **Headless Chromium: HTTP 403 (Cloudflare) on first request.** Headed Chromium worked initially.
@@ -37,6 +35,9 @@ Captured earlier in a normal browser, logged out, for locations 2606 (ACT) and 6
 
 ### Liquorland robots.txt
 Liquorland's `robots.txt` has `Disallow: /api/*` and its category HTML is client-rendered (no product data), so the data can only come from those disallowed URLs. Its ABV is only available per product from yet another disallowed request. The scheduled scraper includes Liquorland **at the operator's request**, never solves a CAPTCHA, and can be switched off (`BEEROO_SKIP_RETAILERS=liquorland`).
+
+### Liquorland via Apify (from 2026-11-23)
+Liquorland's bot protection (Imperva) rejected our own browser from GitHub's servers, so it was paused. At the operator's decision, the cloud scrape now fetches Liquorland through the paid community Apify actor `dromb/liquorland-au-catalog-product-lookup-unofficial` whenever the `APIFY_TOKEN` repository secret is set (`scrapers/liquorland_apify.py`). Unlike our own scrapers, that actor **does** get past the bot protection: it uses residential proxies and re-establishes a session when blocked. It reads the same robots-disallowed `/api/` list. Cost is per result plus Apify platform usage, billed to the token's Apify account. Remove the secret to go back to the browser scraper; `BEEROO_SKIP_RETAILERS=liquorland` still switches Liquorland off entirely.
 
 ## BWS live findings (2026-10-01, from a visible-browser run, Canberra 2600)
 
