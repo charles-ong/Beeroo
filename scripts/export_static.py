@@ -58,9 +58,10 @@ def export(conn, out_dir, states=DEFAULT_STATES, now=None):
                 "generated_at": now.isoformat(), "facets": queries.facets(products)}
         write(out / queries_path(state), {"meta": meta, "locations": locations, "products": products})
 
-        ids = {p["id"] for p in products}
-        for pid in sorted(ids):
-            detail = queries.product_detail(conn, pid, state, now)
+        by_id = {p["id"]: p for p in products}
+        for pid in sorted(by_id):
+            # reuse this state's locations and products: recomputing them per product is two full-table queries each
+            detail = queries.product_detail(conn, pid, state, now, locations=locations, products=[by_id[pid]])
             if detail:
                 write(out / "data" / state / "p" / f"{pid}.json", detail)
 

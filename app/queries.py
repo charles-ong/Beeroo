@@ -416,11 +416,13 @@ def _signal(prices):
     return "usual"
 
 
-def product_detail(conn, product_id, state, now=None):
+def product_detail(conn, product_id, state, now=None, locations=None, products=None):
+    """`locations` and `products` (from resolve_locations / load_products for this state) can be passed in
+    when building many details at once, e.g. the static export; both are full-table queries."""
     now = now or datetime.now(timezone.utc)
-    locations = resolve_locations(conn, state)
+    locations = locations or resolve_locations(conn, state)
     products = [
-        p for p in load_products(conn, locations, now)
+        p for p in (load_products(conn, locations, now) if products is None else products)
         if p["id"] == product_id
     ]
 
