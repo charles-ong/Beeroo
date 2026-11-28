@@ -1,0 +1,75 @@
+{
+  "retailers": {
+    "dan_murphys": {
+      "blocked": {
+        "backoff_until": null,
+        "consecutive": 0
+      },
+      "zones": {
+        "ACT": {
+          "complete": true,
+          "expected": 365,
+          "last_attempt": "2026-11-28T01:42:21.761462+00:00",
+          "last_error": null,
+          "last_success": "2026-11-28T01:42:21.761462+00:00",
+          "products": 360,
+          "store": "dan_murphys:1462"
+        },
+        "NSW": {
+          "complete": true,
+          "expected": 392,
+          "last_attempt": "2026-11-28T01:42:21.761462+00:00",
+          "last_error": null,
+          "last_success": "2026-11-28T01:42:21.761462+00:00",
+          "products": 387,
+          "store": "dan_murphys:1856"
+        },
+        "QLD": {
+          "complete": true,
+          "expected": 362,
+          "last_attempt": "2026-11-28T01:42:21.761462+00:00",
+          "last_error": null,
+          "last_success": "2026-11-28T01:42:21.761462+00:00",
+          "products": 357,
+          "store": "dan_murphys:2543"
+        },
+        "SA": {
+          "complete": true,
+          "expected": 345,
+          "last_attempt": "2026-11-28T01:42:21.761462+00:00",
+          "last_error": "TimeoutError: Locator.click: Timeout 30000ms exceeded.\nCall log:\n  - waiting for get_by_placeholder(\"Start typing...\").filter(visible=True)\n",
+          "last_success": "2026-11-27T01:58:37.901638+00:00",
+          "products": 329,
+          "store": "dan_murphys:5719"
+        },
+        "TAS": {
+          "complete": true,
+          "expected": 351,
+          "last_attempt": "2026-11-28T01:42:21.761462+00:00",
+          "last_error": null,
+          "last_success": "2026-11-28T01:42:21.761462+00:00",
+          "products": 346,
+          "store": "dan_murphys:7600"
+        },
+        "VIC": {
+          "complete": true,
+          "expected": 377,
+          "last_attempt": "2026-11-28T01:42:21.761462+00:00",
+          "last_error": null,
+          "last_success": "2026-11-28T01:42:21.761462+00:00",
+          "products": 371,
+          "store": "dan_murphys:3419"
+        },
+        "WA": {
+          "complete": true,
+          "expected": 390,
+          "last_attempt": "2026-11-28T01:42:21.761462+00:00",
+          "last_error": null,
+          "last_success": "2026-11-28T01:42:21.761462+00:00",
+          "products": 384,
+          "store": "dan_murphys:4256"
+        }
+      }
+    }
+  }
+}
